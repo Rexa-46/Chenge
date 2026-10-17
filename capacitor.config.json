@@ -1,0 +1,16 @@
+{
+  "appId": "ir.shadfar.rexa",
+  "appName": "Rexa",
+  "webDir": "dist",
+  "backgroundColor": "#3E1461",
+  "android": {
+    "backgroundColor": "#3E1461"
+  },
+  "plugins": {
+    "CapacitorSQLite": {
+      "iosIsEncryption": true,
+      "androidIsEncryption": true,
+      "electronIsEncryption": false
+    }
+  }
+}
