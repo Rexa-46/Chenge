@@ -1,0 +1,4 @@
+import { SectionTitle } from "../../components/common/SectionTitle.jsx";
+import { useStyles } from "../../theme/styles.js";
+
+export function BasicSettingsView({ settings, setSettings }) { const st=useStyles(); return <div><div style={{...st.card,padding:16}}><SectionTitle text="تنظیمات پایه"/><label style={st.label}>واحد پول اصلی</label><select value={settings.currency||"IRR"} onChange={e=>setSettings(p=>({...p,currency:e.target.value}))} style={st.input}><option value="IRR">ریال</option><option value="TOMAN">تومان</option><option value="USD">دلار</option></select><label style={st.label}>اندازه نوشته‌ها</label><select value={settings.fontScale||1} onChange={e=>setSettings(p=>({...p,fontScale:Number(e.target.value)}))} style={st.input}><option value="0.9">کوچک</option><option value="1">استاندارد</option><option value="1.1">بزرگ</option><option value="1.2">خیلی بزرگ</option></select></div></div>; }
