@@ -25,7 +25,7 @@ import { seedAccounts, seedCategories, seedSettings } from "./domain/seeds.js";
 import { useAppUpdates } from "./hooks/useAppUpdates.js";
 import { useExchangeRates } from "./hooks/useExchangeRates.js";
 import { useGithubSync } from "./hooks/useGithubSync.js";
-import { rescheduleDueNotifications } from "./services/notifications.js";
+import { listenNotificationActions, onLoanPayRequest, rescheduleDueNotifications } from "./services/notifications.js";
 import { makePinRecord, withoutPin } from "./services/pinLock.js";
 import { loadKey, saveKey } from "./services/storage.js";
 import { openExternalUrl } from "./services/updates.js";
@@ -199,6 +199,13 @@ export default function App() {
       setSettings((s) => (s.pin ? { ...s, pin: "", ...rec } : s));
     })();
   }, [loaded, settings.pin, settings.pinHash]);
+
+  // لمس اعلان سررسید قسط (یا دکمه‌ی «ثبت پرداخت قسط») → رفتن به صفحه‌ی وام‌ها و باز شدن پنجره‌ی ثبت همان قسط
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) return;
+    listenNotificationActions();
+    return onLoanPayRequest((id) => { setFocusId(id); setSubView("loans"); });
+  }, []);
 
   // اعلان‌های واقعی سررسید چک/قبض/قسط و یادآوری‌ها (فقط در APK)
   useEffect(() => {
