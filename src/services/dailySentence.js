@@ -10,13 +10,13 @@ import { todayISO } from "../utils/dates.js";
 /* --- جمله روزانه: فقط از اینترنت، رایگان و نامحدود (Tatoeba — بدون کلید API) ---
    هیچ جمله‌ای داخل برنامه نیست. فقط جمله‌ی امروز تا پایان همان روز نگه داشته می‌شود تا عوض نشود،
    و شناسه‌ی جمله‌های قبلی برای تکراری نشدن. */
-const AI_SENTENCE_CACHE = "rexa:dailySentence";      // جمله امروز (تا پایان روز ثابت می‌ماند)
-const AI_SENTENCE_HISTORY = "rexa:dailySentenceIds"; // فقط شناسه‌ها
+const SENTENCE_CACHE_KEY = "rexa:dailySentence";      // جمله امروز (تا پایان روز ثابت می‌ماند)
+const SENTENCE_HISTORY_KEY = "rexa:dailySentenceIds"; // فقط شناسه‌ها
 const readJson = (k, d) => { try { const v = JSON.parse(localStorage.getItem(k) || "null"); return v ?? d; } catch { return d; } };
 const writeJson = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
 
 let _sentenceErr = "";
-async function httpGetJson(url, ms = 7000) {
+async function httpGetJson(url, ms = 5000) {
   if (Capacitor.isNativePlatform()) {
     const r = await CapacitorHttp.get({ url, headers: { Accept: "application/json" }, connectTimeout: ms, readTimeout: ms });
     if (r.status < 200 || r.status >= 300) throw new Error(`HTTP ${r.status}`);
@@ -59,11 +59,11 @@ async function fetchOnlineSentence(usedIds = []) {
   const WORDS = ["you", "I", "we", "they", "he", "she", "what", "where", "when", "how", "why", "can", "want", "like", "need", "go", "come", "make", "know", "think", "today", "tomorrow", "friend", "work", "home", "water", "time", "good", "very", "please"];
   const word = WORDS[Math.floor(Math.random() * WORDS.length)];
   const errs = [];
-  for (const [name, fn] of [["tatoeba", () => sentenceFromTatoeba(used, "")], ["tatoeba-word", () => sentenceFromTatoeba(used, word)], ["quote", () => sentenceFromQuoteApi(used)]]) {
-    try { return await withTimeout(fn(), 9000); } catch (e) { errs.push(`${name}: ${e?.message || e}`); }
-  }
-  _sentenceErr = errs.join(" | ");
-  throw new Error(_sentenceErr);
+  // هر سه منبع هم‌زمان پرسیده می‌شوند و اولین جمله‌ی معتبر استفاده می‌شود؛ بنابراین یک منبع کند یا قطع، صفحه‌ی اول را معطل نمی‌کند
+  const tasks = [["tatoeba", () => sentenceFromTatoeba(used, "")], ["tatoeba-word", () => sentenceFromTatoeba(used, word)], ["quote", () => sentenceFromQuoteApi(used)]]
+    .map(([name, fn]) => withTimeout(fn(), 6000).catch((e) => { errs.push(`${name}: ${e?.message || e}`); throw e; }));
+  try { return await Promise.any(tasks); }
+  catch { _sentenceErr = errs.join(" | "); throw new Error(_sentenceErr); }
 }
 export const getSentenceError = () => _sentenceErr;
 // جمله امروز؛ اگر اینترنت نبود null (برنامه بدون نمایش جمله وارد می‌شود)
@@ -73,16 +73,16 @@ export function resolveTodaySentence() {
   _todaySentencePromise = (async () => {
     try { localStorage.removeItem("rexa:sentenceStash"); localStorage.removeItem("rexa:dailySentenceHistory"); } catch {}
     const today = todayISO();
-    const cache = readJson(AI_SENTENCE_CACHE, null);
+    const cache = readJson(SENTENCE_CACHE_KEY, null);
     if (cache && cache.date === today && cache.en) return cache;
-    const ids = readJson(AI_SENTENCE_HISTORY, []);
+    const ids = readJson(SENTENCE_HISTORY_KEY, []);
     try {
-      const pick = await withTimeout(fetchOnlineSentence(ids), 28000);
-      writeJson(AI_SENTENCE_HISTORY, [...ids, pick.id].slice(-300));
+      const pick = await withTimeout(fetchOnlineSentence(ids), 8000);
+      writeJson(SENTENCE_HISTORY_KEY, [...ids, pick.id].slice(-300));
       const out = { date: today, ...pick, source: "online" };
-      writeJson(AI_SENTENCE_CACHE, out);
+      writeJson(SENTENCE_CACHE_KEY, out);
       return out;
-    } catch { return null; }
+    } catch { return cache && cache.en ? cache : null; }   // اینترنت نبود/کند بود: آخرین جمله‌ی ذخیره‌شده، وگرنه ورود بدون جمله
   })();
   return _todaySentencePromise;
 }

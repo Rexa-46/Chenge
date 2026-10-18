@@ -24,7 +24,7 @@ function slipTimeToHHMM(raw) {
   if (!m || +m[1] > 23 || +m[2] > 59) return null;
   return `${String(+m[1]).padStart(2, "0")}:${m[2]}`;
 }
-// اگر هوش مصنوعی دسته‌بندی نداد، از روی نام فروشگاه حدس بزن
+// اگر دسته‌بندی از اسکن به‌دست نیامد، از روی نام فروشگاه حدس بزن
 export function guessExpenseCategoryId(categories, merchant) {
   const exp = categories.filter((c) => c.kind === "expense");
   const hay = String(merchant || "");

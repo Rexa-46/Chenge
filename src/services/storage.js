@@ -2,9 +2,9 @@ import { nativeLoad, nativeSave } from "./nativeStorage.js";
 import { App as CapacitorApp } from "@capacitor/app";
 import { Capacitor } from "@capacitor/core";
 
-// Storage abstraction: uses the Claude-artifact window.storage API when present
-// (always true inside claude.ai), and falls back to localStorage automatically
-// when this same code runs as a standalone deployed app / APK build.
+// Storage abstraction: uses the host window.storage API when present,
+// and falls back to localStorage automatically when this same code runs
+// as a standalone deployed app / APK build.
 const hasCloudStorage = typeof window !== "undefined" && window.storage && typeof window.storage.get === "function";
 export async function loadKey(key, fallback, shared) {
   flushSaves();
