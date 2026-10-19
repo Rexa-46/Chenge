@@ -31,6 +31,7 @@ function nextNine() {
 let pendingLoanId = null;
 const loanPaySubs = new Set();
 export const consumePendingLoanPay = () => { const v = pendingLoanId; pendingLoanId = null; return v; };
+export function requestLoanPay(id) { pendingLoanId = String(id); loanPaySubs.forEach((fn) => { try { fn(pendingLoanId); } catch {} }); }
 export function onLoanPayRequest(fn) { loanPaySubs.add(fn); return () => loanPaySubs.delete(fn); }
 let actionListenerReady = false;
 export async function listenNotificationActions() {
@@ -84,8 +85,8 @@ export async function rescheduleDueNotifications({ enabled, checks, bills, loans
   (reminders || []).filter((r) => !r.done && r.date).forEach((r) => push(atNine(r.date, 0), "یادآوری Rexa", r.text || ""));
   const list = items.sort((a, b) => a.when - b.when).slice(0, DUE_NOTIF_MAX);
   if (!list.length) return;
-  let perm = await LocalNotifications.checkPermissions();
-  if (perm.display === "prompt" || perm.display === "prompt-with-rationale") perm = await LocalNotifications.requestPermissions();
+  // مجوز اعلان هیچ‌وقت خودکار درخواست نمی‌شود؛ فقط وقتی کاربر در «مدیریت دسترسی» یا زنگ بالای صفحه تأیید کرده باشد
+  const perm = await LocalNotifications.checkPermissions();
   if (perm.display !== "granted") return;
   try { await LocalNotifications.createChannel({ id: "rexa-due", name: "سررسیدها و یادآوری‌ها", description: "چک، قبض، قسط و یادآوری‌ها", importance: 4, visibility: 1 }); } catch {}
   try { await LocalNotifications.registerActionTypes({ types: [{ id: LOAN_ACTION_TYPE, actions: [{ id: LOAN_ACTION_PAY, title: "ثبت پرداخت قسط" }] }] }); } catch {}
