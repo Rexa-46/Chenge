@@ -25,7 +25,10 @@ import { seedAccounts, seedCategories, seedSettings } from "./domain/seeds.js";
 import { useAppUpdates } from "./hooks/useAppUpdates.js";
 import { useExchangeRates } from "./hooks/useExchangeRates.js";
 import { useGithubSync } from "./hooks/useGithubSync.js";
-import { listenNotificationActions, onLoanPayRequest, rescheduleDueNotifications } from "./services/notifications.js";
+import { LocalNotifications } from "@capacitor/local-notifications";
+import { AlarmsSheet } from "./components/sheets/AlarmsSheet.jsx";
+import { buildAlarms } from "./domain/alarms.js";
+import { listenNotificationActions, onLoanPayRequest, requestLoanPay, rescheduleDueNotifications } from "./services/notifications.js";
 import { makePinRecord, withoutPin } from "./services/pinLock.js";
 import { loadKey, saveKey } from "./services/storage.js";
 import { openExternalUrl } from "./services/updates.js";
@@ -42,6 +45,11 @@ import { OperationsView } from "./views/operations/OperationsView.jsx";
 import { ReportsView } from "./views/reports/ReportsView.jsx";
 import { SUBVIEW_TITLES } from "./views/subViewTitles.js";
 import { TransactionsView } from "./views/transactions/TransactionsView.jsx";
+
+// آخرین وضعیت (تب و صفحه‌ی باز) هنگام بسته شدن ذخیره می‌شود و با باز شدن برنامه برمی‌گردد
+const LAST_VIEW_KEY = "rexa:lastView";
+const VALID_TABS = ["home", "transactions", "operations", "checks", "reports"];
+const readLastView = () => { try { return JSON.parse(localStorage.getItem(LAST_VIEW_KEY) || "null") || {}; } catch { return {}; } };
 
 export default function App() {
   const [loaded, setLoaded] = useState(false);
@@ -71,8 +79,10 @@ export default function App() {
   const [currencies, setCurrencies] = useState([]);
   const [goals, setGoals] = useState([]);
 
-  const [tab, setTab] = useState("home");
-  const [subView, setSubView] = useState(null);
+  const [tab, setTab] = useState(() => (VALID_TABS.includes(readLastView().tab) ? readLastView().tab : "home"));
+  const [subView, setSubView] = useState(() => { const v = readLastView().subView; return v && SUBVIEW_TITLES[v] ? v : null; });
+  const [showAlarms, setShowAlarms] = useState(false);
+  const [notifBlocked, setNotifBlocked] = useState(false);
   const [showAdd, setShowAdd] = useState(false);
   const [prefillTx, setPrefillTx] = useState(null);
   const [open, setOpen] = useState({ shortcut: true });
@@ -199,6 +209,27 @@ export default function App() {
       setSettings((s) => (s.pin ? { ...s, pin: "", ...rec } : s));
     })();
   }, [loaded, settings.pin, settings.pinHash]);
+
+  useEffect(() => { try { localStorage.setItem(LAST_VIEW_KEY, JSON.stringify({ tab, subView })); } catch {} }, [tab, subView]);
+
+  const alarms = useMemo(() => buildAlarms({ checks, bills, loans, reminders, checkDays: Number(settings.checkReminderDays) || 0 }), [checks, bills, loans, reminders, settings.checkReminderDays, showAlarms]);
+  function openBell() {
+    setShowAlarms(true);
+    if (Capacitor.isNativePlatform()) LocalNotifications.checkPermissions().then((p) => setNotifBlocked(p.display !== "granted")).catch(() => {});
+  }
+  async function enableNotif() {
+    try {
+      const p = await LocalNotifications.requestPermissions();
+      setNotifBlocked(p.display !== "granted");
+      if (p.display === "granted") rescheduleDueNotifications({ enabled: settings.dueNotif !== false, checks, bills, loans, reminders, checkDays: Number(settings.checkReminderDays) || 0 }).catch(() => {});
+    } catch {}
+  }
+  function openAlarm(it) {
+    setShowAlarms(false);
+    setTab("home");
+    setFocusId(it.id); setSubView(it.view);
+    if (it.kind === "loan") requestLoanPay(it.id);
+  }
 
   // لمس اعلان سررسید قسط (یا دکمه‌ی «ثبت پرداخت قسط») → رفتن به صفحه‌ی وام‌ها و باز شدن پنجره‌ی ثبت همان قسط
   useEffect(() => {
@@ -426,7 +457,7 @@ export default function App() {
     );
   }
   if ((settings.pinHash || settings.pin || settings.biometricEnabled) && !unlocked) {
-    return <LockScreen pin={settings.pin} pinHash={settings.pinHash} pinSalt={settings.pinSalt} onUnlock={() => setUnlocked(true)} biometricEnabled={settings.biometricEnabled} />;
+    return <LockScreen pin={settings.pin} pinHash={settings.pinHash} pinSalt={settings.pinSalt} onUnlock={() => setUnlocked(true)} biometricEnabled={(!!(settings.pinHash || settings.pin) || !!settings.biometricEnabled) && !settings.biometricDisabled} />;
   }
 
   function openWithPrefill(data) {
@@ -489,10 +520,10 @@ export default function App() {
         `}</style>
 
         {subView ? (
-          <Header title={SUBVIEW_TITLES[subView]} back onBack={() => setSubView(null)} />
+          <Header title={SUBVIEW_TITLES[subView]} back onBack={() => setSubView(null)} onBell={openBell} alarmCount={alarms.length} />
         ) : (
           <Header title={settings.profile?.name || "alireza shadfar"} onMenu={() => setMenuOpen(true)}
-            onMic={registerVoiceTransaction} />
+            onMic={registerVoiceTransaction} onBell={openBell} alarmCount={alarms.length} />
         )}
 
         {(updateInfo || cloud.state.conflict) && (
@@ -532,7 +563,7 @@ export default function App() {
                 settings={settings} setSettings={setSettings} rates={rates} fetchRates={fetchRates}
                 onNote={() => setShowNoteModal(true)} onReminder={() => setShowReminderModal(true)}
                 shortcuts={shortcuts}
-                onRunShortcut={(sc) => { setShowQuickAdd(false); setShowAdd(true); setPrefillTx({ type: sc.type, categoryId: sc.categoryId, accountId: sc.accountId, note: sc.note || `میانبر: ${sc.name}` }); }}
+                onRunShortcut={(sc) => { setShowQuickAdd(false); setShowAdd(true); setPrefillTx({ type: sc.type, categoryId: sc.categoryId, accountId: sc.accountId, fromCategoryId: sc.fromCategoryId || undefined, note: sc.note || `میانبر: ${sc.name}`, _shortcutId: sc.id }); }}
                 openShortcuts={() => setSubView("shortcuts")}
                 onOpenTransactions={() => setTab("transactions")}
                 onOpenItem={(view, id) => { setFocusId(id); setSubView(view); }}
@@ -552,7 +583,7 @@ export default function App() {
               />
             )}
             {tab === "operations" && <OperationsView setSubView={setSubView} onAdd={() => setShowAdd(true)} />}
-            {tab === "checks" && <ChecksManager checks={checks} setChecks={setChecks} accounts={accounts} setTransactions={setTransactions} focusId={focusId} setFocusId={setFocusId} />}
+            {tab === "checks" && <ChecksManager checks={checks} setChecks={setChecks} accounts={accounts} categories={categories} setTransactions={setTransactions} focusId={focusId} setFocusId={setFocusId} />}
             {tab === "reports" && (
               <ReportsView
                 expenseByCategory={expenseByCategory} incomeByCategory={incomeByCategory}
@@ -618,10 +649,14 @@ export default function App() {
             onSubmit={(tx) => {
               if (prefillTx?._editId) setTransactions((prev) => prev.map((item) => item.id === prefillTx._editId ? { ...item, ...tx, id: item.id, createdAt: item.createdAt } : item));
               else addTransaction(tx);
+              // میانبر: حسابی که این بار انتخاب شد، دفعه‌ی بعد پیش‌فرض همان میانبر می‌شود
+              if (prefillTx?._shortcutId) setShortcuts((p) => p.map((x) => x.id === prefillTx._shortcutId ? { ...x, accountId: tx.accountId || "", fromCategoryId: tx.fromCategoryId || "" } : x));
               setShowAdd(false); setPrefillTx(null);
             }}
           />
         )}
+        {showAlarms && <AlarmsSheet items={alarms} onClose={() => setShowAlarms(false)} onOpen={openAlarm} notifBlocked={notifBlocked} onEnableNotif={enableNotif}
+          onDoneReminder={(id) => setReminders((p) => p.map((r) => r.id === id ? { ...r, done: true } : r))} />}
         {menuOpen && <SideMenu onClose={() => setMenuOpen(false)} setSubView={(v) => { setSubView(v); setMenuOpen(false); }} profileName={settings.profile?.name} />}
       </div>
     </ThemeCtx.Provider>
