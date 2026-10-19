@@ -13,10 +13,23 @@ import { useFocusItem } from "../../hooks/useFocusItem.js";
 import { consumePendingLoanPay, onLoanPayRequest } from "../../services/notifications.js";
 import { BRAND, FONT } from "../../theme/palette.js";
 import { useStyles } from "../../theme/styles.js";
-import { daysUntil, faLongDate, todayISO } from "../../utils/dates.js";
+import { daysUntil, faLongDate, jalaliParts, todayISO } from "../../utils/dates.js";
 import { toFaInt } from "../../utils/format.js";
 import { uid } from "../../utils/id.js";
 import { toBody } from "../../utils/portal.js";
+
+/* سررسید قسط بعدی نسبت به ماه شمسی جاری: «ماه جاری» / «ماه بعد» / عقب‌افتاده / نام ماه */
+function dueMonthTag(iso) {
+  if (!iso) return "";
+  try {
+    const a = jalaliParts(new Date(`${iso}T12:00:00Z`)), b = jalaliParts(new Date());
+    const diff = (a.y - b.y) * 12 + (a.m - b.m);
+    if (diff === 0) return "ماه جاری";
+    if (diff === 1) return "ماه بعد";
+    if (diff < 0) return diff === -1 ? "ماه گذشته" : "گذشته";
+    return new Intl.DateTimeFormat("fa-IR", { month: "long" }).format(new Date(`${iso}T12:00:00Z`));
+  } catch { return ""; }
+}
 
 export function LoansManager({ loans, setLoans, accounts = [], categories = [], addCategory, setTransactions, focusId, setFocusId }) {
   const st = useStyles();
@@ -171,7 +184,12 @@ export function LoansManager({ loans, setLoans, accounts = [], categories = [], 
                   <button onClick={() => removeLoan(l)} aria-label="حذف" style={{ background: "none", border: "none", color: BRAND.crimson, cursor: "pointer" }}><Trash2 size={15} /></button>
                 </span>
               </div>
-              <div style={{ fontSize: 12.5, color: overdue ? BRAND.crimson : "#8a8194", marginBottom: 4 }}>قسط {toFaInt(l.paidCount)} از {toFaInt(l.installments)} پرداخت شده — سررسید بعدی: {!settled ? faLongDate(new Date(nextDue)) : "تسویه شده"}</div>
+              <div style={{ fontSize: 12.5, color: overdue ? BRAND.crimson : "#8a8194", marginBottom: 4 }}>قسط {toFaInt(l.paidCount)} از {toFaInt(l.installments)} پرداخت شده</div>
+              {!settled && <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", fontSize: 12.5, fontWeight: 700, color: overdue ? BRAND.crimson : BRAND.header, marginBottom: 4 }}>
+                <span>سررسید قسط بعدی ({toFaInt(Number(l.paidCount || 0) + 1)}): {faLongDate(new Date(nextDue))}</span>
+                <span style={{ fontSize: 10.5, fontWeight: 800, padding: "2px 9px", borderRadius: 10, background: overdue ? "#fde8ea" : dueMonthTag(nextDue) === "ماه جاری" ? "#e8f7ee" : "#eee9f6", color: overdue ? BRAND.crimson : dueMonthTag(nextDue) === "ماه جاری" ? BRAND.darkgreen : BRAND.violet }}>{dueMonthTag(nextDue)}</span>
+              </div>}
+              {settled && <div style={{ fontSize: 12.5, fontWeight: 700, color: BRAND.darkgreen, marginBottom: 4 }}>تسویه شده</div>}
               <div style={{ fontSize: 12, color: "#8a8194", marginBottom: 6 }}>{l.accountId && accName(l.accountId) ? `حساب بانکی: ${accName(l.accountId)}` : "حساب بانکی: هنگام ثبت قسط انتخاب می‌شود"}</div>
               {expandedId === l.id && (() => {
                 const totalPaid = Number(l.paidCount || 0) * Number(l.monthlyPayment || 0);
