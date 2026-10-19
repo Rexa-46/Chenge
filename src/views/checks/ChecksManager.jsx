@@ -7,6 +7,7 @@ import { StatusBadge } from "../../components/common/StatusBadge.jsx";
 import { AmountInput } from "../../components/inputs/AmountInput.jsx";
 import { JalaliDateInput } from "../../components/inputs/JalaliDateInput.jsx";
 import { KeypadInput } from "../../components/inputs/KeypadInput.jsx";
+import { SourceAccountField } from "../../components/inputs/SourceAccountField.jsx";
 import { useFocusItem } from "../../hooks/useFocusItem.js";
 import { BRAND } from "../../theme/palette.js";
 import { pillStyle, useStyles } from "../../theme/styles.js";
@@ -17,7 +18,7 @@ import { uid } from "../../utils/id.js";
 /* ---------------------------------------------------------
    Checks Manager
 --------------------------------------------------------- */
-export function ChecksManager({ checks, setChecks, accounts = [], setTransactions, focusId, setFocusId }) {
+export function ChecksManager({ checks, setChecks, accounts = [], categories = [], setTransactions, focusId, setFocusId }) {
   const st = useStyles();
   const [expandedId, setExpandedId] = useState(null);
   useFocusItem(focusId, setFocusId, setExpandedId);
@@ -60,7 +61,7 @@ export function ChecksManager({ checks, setChecks, accounts = [], setTransaction
         <label style={st.label}>شماره چک</label>
         <input placeholder="شماره سریال چک" value={form.checkNumber} onChange={(e) => setForm({ ...form, checkNumber: e.target.value })} style={{ ...st.input, direction: "ltr", textAlign: "right" }} />
         <label style={st.label}>حساب مقصد / پرداخت</label>
-        <select value={form.accountId} onChange={(e) => setForm({ ...form, accountId: e.target.value })} style={st.input}><option value="">انتخاب حساب</option>{accounts.filter(a => a.active !== false).map(a => <option key={a.id} value={a.id}>{a.name}</option>)}</select>
+        <SourceAccountField accounts={accounts.filter((a) => a.active !== false)} categories={categories} accountId={form.accountId} fromCategoryId="" allowTwoWay={false} title={form.type === "received" ? "به حساب" : "از حساب"} onChange={(v) => setForm({ ...form, accountId: v.accountId })} st={st} />
         <label style={st.label}>تاریخ سررسید</label>
         <JalaliDateInput value={form.dueDate} onChange={(v) => setForm({ ...form, dueDate: v })} style={st.input} />
         <input placeholder="یادداشت (اختیاری)" value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} style={st.input} />
