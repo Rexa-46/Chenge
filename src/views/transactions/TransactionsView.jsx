@@ -11,6 +11,18 @@ import { faLongDate } from "../../utils/dates.js";
 import { toFaInt } from "../../utils/format.js";
 import { TransactionSummaryChart } from "./TransactionSummaryChart.jsx";
 
+/* خط منحنیِ پایین کادر: وسطش کمی به پایین فرو می‌رود؛ لمس کل این خط جزئیات را باز/بسته می‌کند */
+function CurveToggle({ open, onClick, color }) {
+  const t = useT();
+  return (
+    <div onClick={onClick} role="button" aria-label={open ? "بستن جزئیات" : "نمایش جزئیات"} style={{ margin: "10px -14px -14px", height: 22, cursor: "pointer", position: "relative", WebkitTapHighlightColor: "transparent" }}>
+      <svg viewBox="0 0 100 22" preserveAspectRatio="none" width="100%" height="22" style={{ display: "block", transform: open ? "scaleY(-1)" : "none", transition: "transform .25s" }}>
+        <path d="M0 3 H33 C42 3 42 15 50 15 C58 15 58 3 67 3 H100" fill="none" stroke={color || t.border} strokeWidth="1.6" vectorEffect="non-scaling-stroke" strokeLinecap="round" opacity="0.75" />
+      </svg>
+    </div>
+  );
+}
+
 export function TransactionsView({ transactions, catById, accById, checks = [], filter, setFilter, onDelete, onEdit, search, setSearch }) {
   const t = useT();
   const [preview, setPreview] = useState(null);
@@ -76,7 +88,6 @@ export function TransactionsView({ transactions, catById, accById, checks = [], 
                         </div>
                         <div style={{ textAlign: "left" }}>
                           <div style={{ fontWeight: 800, color: statusColor2, fontSize: 14.5 }}>{toFaInt(tx.amount)}</div>
-                          <button onClick={() => setExpandedId(expandedId === tx.id ? null : tx.id)} style={{ marginTop: 6, background: expandedId === tx.id ? BRAND.violet : "#f1eef4", color: expandedId === tx.id ? "#fff" : "#5f566b", border: "none", borderRadius: 7, padding: "5px 9px", fontSize: 11, fontWeight: 700 }}>{expandedId === tx.id ? "بستن" : "جزئیات"}</button>
                         </div>
                       </div>
                       {expandedId === tx.id && (() => {
@@ -91,6 +102,7 @@ export function TransactionsView({ transactions, catById, accById, checks = [], 
                           ].map(([k,v]) => <div key={k} style={{ display: "flex", justifyContent: "space-between", gap: 10, padding: "5px 0", borderBottom: `1px solid ${t.border}` }}><span style={{ color: t.sub }}>{k}</span><strong>{v}</strong></div>)}
                         </div> : null;
                       })()}
+                      <CurveToggle open={expandedId === tx.id} onClick={() => setExpandedId(expandedId === tx.id ? null : tx.id)} color={statusColor2} />
                     </div>
                   );
                 }
@@ -119,7 +131,6 @@ export function TransactionsView({ transactions, catById, accById, checks = [], 
                       <div style={{ textAlign: "left" }}>
                         <div style={{ fontWeight: 800, color, fontSize: 14.5 }}>{toFaInt(tx.amount)}</div>
                         <div style={{ display: "flex", gap: 4, marginTop: 6 }}>
-                          <button onClick={() => setExpandedId(expandedId === tx.id ? null : tx.id)} style={{ background: expandedId === tx.id ? BRAND.violet : "#f1eef4", border: "none", color: expandedId === tx.id ? "#fff" : "#5f566b", cursor: "pointer", padding: "5px 8px", borderRadius: 7, fontSize: 11, fontWeight: 700 }} title="جزئیات">{expandedId === tx.id ? "بستن" : "جزئیات"}</button>
                           <button onClick={() => onEdit?.(tx)} style={{ background: "none", border: "none", color: BRAND.violet, cursor: "pointer", padding: 3 }} title="ویرایش"><Pencil size={15} /></button>
                           <button onClick={() => { if (window.confirm("این تراکنش حذف شود؟")) onDelete(tx.id); }} style={{ background: "none", border: "none", color: BRAND.crimson, cursor: "pointer", padding: 3 }} title="حذف"><Trash2 size={15} /></button>
                         </div>
@@ -146,6 +157,7 @@ export function TransactionsView({ transactions, catById, accById, checks = [], 
                         ].map(([k,v]) => <div key={k} style={{ display: "flex", justifyContent: "space-between", gap: 12, padding: "5px 0", borderBottom: `1px solid ${t.border}` }}><span style={{ color: t.sub }}>{k}</span><strong style={{ textAlign: "left", maxWidth: "65%", wordBreak: "break-word" }}>{v}</strong></div>)}
                       </div>
                     )}
+                    <CurveToggle open={expandedId === tx.id} onClick={() => setExpandedId(expandedId === tx.id ? null : tx.id)} color={color} />
                   </div>
                 );
               })}
