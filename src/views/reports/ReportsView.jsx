@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { ChevronRight } from "lucide-react";
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
+import { ExpenseDistribution } from "../../components/charts/ExpenseDistribution.jsx";
 import { ExplodingPie } from "../../components/charts/ExplodingPie.jsx";
 import { GaugeSpeedometer } from "../../components/charts/GaugeSpeedometer.jsx";
 import { EmptyRow } from "../../components/common/EmptyRow.jsx";
@@ -158,8 +159,8 @@ export function ReportsView({ members = [], events = [], projects = [], loans = 
       </div>
 
       <SectionTitle text="توزیع هزینه‌ها بر اساس دسته" />
-      <div style={{ ...st.card, padding: 12, marginBottom: 18 }}>
-        <ExplodingPie data={reportExpenseByCategory} currency={currency} usdRate={usdRate} />
+      <div style={{ marginBottom: 18 }}>
+        <ExpenseDistribution data={reportExpenseByCategory} transactions={transactions} currency={currency} usdRate={usdRate} />
       </div>
 
       <SectionTitle text="گزارش چک‌ها" />
