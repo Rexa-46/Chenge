@@ -6,7 +6,9 @@ const permissions = [
   '<uses-permission android:name="android.permission.RECEIVE_SMS" />',
   // دوربین برای اسکن برگه‌ی پوز (ورودی فایل با capture)
   '<uses-permission android:name="android.permission.CAMERA" />',
-  '<uses-feature android:name="android.hardware.camera" android:required="false" />'
+  '<uses-feature android:name="android.hardware.camera" android:required="false" />',
+  // اعلان‌های سررسید باید سر ساعت برسند (اندروید ۱۲ به بالا)
+  '<uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />'
 ];
 for (const p of permissions) if (!xml.includes(p)) xml = xml.replace(/<manifest\b[^>]*>/, (m) => `${m}\n    ${p}`);
 fs.writeFileSync(file, xml);
