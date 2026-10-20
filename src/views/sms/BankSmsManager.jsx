@@ -6,13 +6,20 @@ import { SectionTitle } from "../../components/common/SectionTitle.jsx";
 import { useT } from "../../theme/ThemeContext.js";
 import { BRAND } from "../../theme/palette.js";
 import { useStyles } from "../../theme/styles.js";
+import { isoOf } from "../../utils/dates.js";
 import { toFaInt } from "../../utils/format.js";
 import { parseBankSms } from "../../utils/smsParser.js";
 
 /* ---------------------------------------------------------
    Bank SMS quick-add (پیامک بانکی)
 --------------------------------------------------------- */
-export function BankSmsManager({ openWithPrefill, onBack, categories, accounts, addTransaction }) {
+const CONFIRMED_KEY = "rexa:smsConfirmed";   // شناسه‌ی پیامک‌های ثبت‌شده؛ بعد از بستن برنامه هم می‌ماند تا تراکنش تکراری ساخته نشود
+const ACCOUNT_KEY = "rexa:smsAccount";
+const readConfirmed = () => { try { const v = JSON.parse(localStorage.getItem(CONFIRMED_KEY) || "[]"); return Array.isArray(v) ? v : []; } catch { return []; } };
+// شناسه‌ی پایدار: خودِ id پیامک + تاریخ + مبلغ (id صندوق پیامک ممکن است بعد از بازسازی تغییر کند)
+const smsKey = (m) => `${m.id}|${m.date}|${m.parsed?.amount}`;
+
+export function BankSmsManager({ openWithPrefill, onBack, categories, accounts, addTransaction, transactions = [] }) {
   const st = useStyles();
   const t = useT();
   const [text, setText] = useState("");
@@ -21,8 +28,12 @@ export function BankSmsManager({ openWithPrefill, onBack, categories, accounts, 
   const [syncing, setSyncing] = useState(false);
   const [syncError, setSyncError] = useState("");
   const [suggestions, setSuggestions] = useState([]); // [{ id, body, date, parsed }]
-  const [confirmedIds, setConfirmedIds] = useState([]);
-  const defaultAccountId = accounts[0]?.id;
+  const [confirmedIds, setConfirmedIds] = useState(readConfirmed);
+  const activeAccounts = accounts.filter((a) => a.active !== false);
+  const [accountId, setAccountId] = useState(() => { try { return localStorage.getItem(ACCOUNT_KEY) || ""; } catch { return ""; } });
+  const chosenAccountId = activeAccounts.some((a) => a.id === accountId) ? accountId : (activeAccounts.length === 1 ? activeAccounts[0].id : "");
+  const pickAccount = (id) => { setAccountId(id); try { localStorage.setItem(ACCOUNT_KEY, id); } catch {} };
+  const alreadyDone = (m) => confirmedIds.includes(smsKey(m)) || transactions.some((x) => x.smsKey === smsKey(m));
 
   async function syncFromPhone() {
     setSyncing(true);
@@ -39,8 +50,10 @@ export function BankSmsManager({ openWithPrefill, onBack, categories, accounts, 
       const candidates = (smsList || [])
         .map((m) => ({ id: String(m.id), body: m.body || "", date: m.date, parsed: parseBankSms(m.body || "") }))
         .filter((m) => m.parsed.amount && /بانک|کارت|حساب|واریز|برداشت|خرید|پرداخت|انتقال/.test(m.body));
-      setSuggestions(candidates);
-      if (candidates.length === 0) setSyncError("پیامک بانکی جدیدی پیدا نشد (یا همه قبلاً بررسی شده‌اند).");
+      const done = readConfirmed();
+      const fresh = candidates.filter((m) => !done.includes(smsKey(m)) && !transactions.some((x) => x.smsKey === smsKey(m)));
+      setSuggestions(fresh);
+      if (fresh.length === 0) setSyncError("پیامک بانکی جدیدی پیدا نشد (یا همه قبلاً بررسی شده‌اند).");
     } catch (e) {
       setSyncError("خواندن پیامک‌ها ممکن نشد. این قابلیت فقط در اپلیکیشن نصب‌شده (APK) کار می‌کند، نه در مرورگر.");
     }
@@ -48,14 +61,16 @@ export function BankSmsManager({ openWithPrefill, onBack, categories, accounts, 
   }
 
   function confirmSuggestion(s) {
-    if (!defaultAccountId) { alert("اول یک حساب بانکی بساز."); return; }
+    if (alreadyDone(s)) return;
+    if (!chosenAccountId) { alert(activeAccounts.length ? "اول حساب مورد نظر را از لیست «ثبت در حساب» انتخاب کن." : "اول یک حساب بانکی بساز."); return; }
     const catMatch = categories.find((c) => c.name === s.parsed.categoryHint && c.kind === s.parsed.type);
+    const key = smsKey(s);
     addTransaction({
       type: s.parsed.type, amount: s.parsed.amount, categoryId: catMatch?.id || "",
-      accountId: defaultAccountId, date: new Date(s.date).toISOString().slice(0, 10),
-      note: s.body.slice(0, 140), tags: ["پیامک بانکی"],
+      accountId: chosenAccountId, date: isoOf(new Date(s.date)),
+      note: s.body.slice(0, 140), tags: ["پیامک بانکی"], smsKey: key,
     });
-    setConfirmedIds((p) => [...p, s.id]);
+    setConfirmedIds((p) => { const next = [...p, key].slice(-1000); try { localStorage.setItem(CONFIRMED_KEY, JSON.stringify(next)); } catch {} return next; });
   }
 
   return (
@@ -73,14 +88,19 @@ export function BankSmsManager({ openWithPrefill, onBack, categories, accounts, 
           <RefreshCw size={16} /> {syncing ? "در حال بررسی پیامک‌ها..." : "بررسی پیامک‌های بانکی گوشی"}
         </button>
         {syncError && <div style={{ fontSize: 12, color: BRAND.crimson, marginTop: 8 }}>{syncError}</div>}
+        <label style={{ display: "block", fontSize: 12, color: t.sub, marginTop: 12, marginBottom: 4 }}>ثبت در حساب</label>
+        <select value={chosenAccountId} onChange={(e) => pickAccount(e.target.value)} style={{ ...st.input, marginBottom: 0 }}>
+          <option value="">— انتخاب حساب —</option>
+          {activeAccounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+        </select>
       </div>
 
       {suggestions.length > 0 && (
         <>
-          <SectionTitle text={`${toFaInt(suggestions.filter((s) => !confirmedIds.includes(s.id)).length)} تراکنش پیشنهادی از پیامک`} />
+          <SectionTitle text={`${toFaInt(suggestions.filter((s) => !alreadyDone(s)).length)} تراکنش پیشنهادی از پیامک`} />
           <div style={{ ...st.card, padding: "4px 12px", marginBottom: 16 }}>
             {suggestions.map((s) => {
-              const done = confirmedIds.includes(s.id);
+              const done = alreadyDone(s);
               return (
                 <div key={s.id} style={{ padding: "10px 4px", borderBottom: `1px solid ${t.border}`, opacity: done ? 0.45 : 1 }}>
                   <div style={{ fontSize: 12.5, marginBottom: 4 }}>{s.body.slice(0, 90)}</div>

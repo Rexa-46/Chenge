@@ -12,7 +12,7 @@ import { AmountInput } from "../../components/inputs/AmountInput.jsx";
 import { accTypeFa } from "../../domain/reportMath.js";
 import { BRAND, FONT } from "../../theme/palette.js";
 import { useStyles } from "../../theme/styles.js";
-import { faLongDate, jalaliYear, jf, todayISO } from "../../utils/dates.js";
+import { addDays, faLongDate, jalaliMonthRange, jalaliYear, jf, parseISO, todayISO } from "../../utils/dates.js";
 import { formatMoney, toFaInt } from "../../utils/format.js";
 import { BalanceSheetReport } from "./BalanceSheetReport.jsx";
 import { BalancesReport } from "./BalancesReport.jsx";
@@ -28,11 +28,11 @@ export function ReportsView({ members = [], events = [], projects = [], loans = 
   const [period, setPeriod] = useState("year");
   const [selectedAccount, setSelectedAccount] = useState(null); const [selectedMember, setSelectedMember] = useState(null); const [editBalance, setEditBalance] = useState("");
   const periodTx = useMemo(() => {
-    const now = new Date(); const today = todayISO();
-    if (period === "day") return transactions.filter((x) => x.date === today);
-    if (period === "month") return transactions.filter((x) => { const d = new Date(x.date); return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth(); });
-    if (period === "week") { const start = new Date(now); start.setDate(now.getDate() - 6); const st = start.toISOString().slice(0,10); return transactions.filter((x) => x.date >= st && x.date <= today); }
-    return transactions.filter((x) => jalaliYear(new Date(x.date)) === jalaliYear(now));
+    const today = todayISO();
+    if (period === "day") return transactions.filter((x) => String(x.date).slice(0, 10) === today);
+    if (period === "month") { const { start, end } = jalaliMonthRange(today); return transactions.filter((x) => { const d = String(x.date).slice(0, 10); return d >= start && d <= end; }); }   // ماه شمسی
+    if (period === "week") { const st = addDays(today, -6); return transactions.filter((x) => { const d = String(x.date).slice(0, 10); return d >= st && d <= today; }); }
+    return transactions.filter((x) => jalaliYear(parseISO(x.date)) === jalaliYear(parseISO(today)));
   }, [transactions, period]);
   const reportIncome = periodTx.filter((x) => x.type === "income").reduce((s, x) => s + x.amount, 0);
   const reportExpense = periodTx.filter((x) => x.type === "expense").reduce((s, x) => s + x.amount, 0);

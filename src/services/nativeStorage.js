@@ -22,8 +22,9 @@ async function getDb() {
   if (!dbPromise) {
     dbPromise = (async () => {
       const sqlite = new SQLiteConnection(CapacitorSQLite);
-      const stored = await secureGet('rexa.sqlite.secret');
-      let secret = stored || null;
+      // اگر خواندن کلید با خطا شکست بخورد، کلید جدید ساخته نمی‌شود (کلید جدید دیتابیس قبلی را غیرقابل‌خواندن می‌کند)؛ خطا به بالا می‌رود
+      const stored = await SecureStorage.get('rexa.sqlite.secret', false, false);
+      let secret = typeof stored === 'string' && stored ? stored : null;
       if (!secret) {
         secret = randomSecret();
         await SecureStorage.set('rexa.sqlite.secret', secret, false, false);
@@ -91,7 +92,7 @@ export async function nativeLoad(key, fallback) {
   const res = await ctx.db.query('SELECT value FROM kv_store WHERE key = ?', [key]);
   const raw = res.values?.[0]?.value;
   if (raw == null) return fallback;
-  try { return JSON.parse(raw); } catch { return fallback; }
+  return JSON.parse(raw);   // JSON خراب → خطا (نه مقدار خالی)، تا داده‌ی موجود بازنویسی نشود
 }
 
 export async function nativeSave(key, value) {

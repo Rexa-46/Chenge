@@ -26,33 +26,69 @@ export function normalizeDigitsText(text = "") {
     .replace(/[۰-۹]/g, (d) => "0123456789"["۰۱۲۳۴۵۶۷۸۹".indexOf(d)])
     .replace(/[٠-٩]/g, (d) => "0123456789"["٠١٢٣٤٥٦٧٨٩".indexOf(d)]);
 }
-export function parseBankSms(text) {
+const AMOUNT_KEYWORDS = /مبلغ|واریز|برداشت|خرید|پرداخت|انتقال|هزینه|دریافت|کسر|اعتبار|بدهکار|بستانکار|amount|credit|debit|deposit/i;
+const SKIP_BEFORE = /(?:کارت|شماره|شناسه|حساب|پیگیری|مرجع|رهگیری|شبا|تلفن|موبایل|کد|مانده|موجودی|باقیمانده|بالانس|balance|ref|iban)\s*[:：]?\s*[*xX\-\s]*$/i;
+const INCOME_RE = /واریز|دریافت|حقوق|دستمزد|درآمد|طلب|سود|بستانکار|credit|deposit|income/gi;
+const EXPENSE_RE = /برداشت|خرید|خرج|پرداخت|هزینه|دادم|داد|کرایه|بنزین|رستوران|شام|ناهار|کارمزد|کسر|بدهکار|debit|purchase|expense/gi;
+// عدد = مبلغ، فقط وقتی با ریال/تومان همراه باشد یا کنار کلمه‌ی مبلغ بیاید؛ شماره کارت، تاریخ، ساعت، مانده و شماره پیگیری مبلغ حساب نمی‌شوند
+function pickAmount(normalized) {
+  const re = /(\d[\d,]*(?:\.\d+)?)\s*(میلیارد|میلیون|هزار)?\s*(تومان|تومن|ریال)?/g;
+  const cands = [];
+  let m;
+  while ((m = re.exec(normalized))) {
+    const start = m.index, end = start + m[0].length;
+    const numText = m[1].replace(/,/g, "");
+    const before = normalized.slice(Math.max(0, start - 24), start);
+    const prevCh = normalized[start - 1] || "", nextCh = normalized[start + m[1].length] || "";
+    if (/[\/:\-]\d$/.test(before.slice(-2)) || /^[\/:]\d/.test(normalized.slice(start + m[1].length, start + m[1].length + 2))) continue;   // تاریخ یا ساعت
+    if (/\*|x/i.test(prevCh) || /\*/.test(nextCh)) continue;                                              // ****1234
+    if (!m[3] && !m[2] && (numText.length >= 13 || numText.length === 4 && /(?:کارت|حساب)\D{0,6}$/.test(before))) continue;
+    if (!m[2] && !m[3] && /^\d{10,}$/.test(numText)) continue;                                              // شماره حساب/پیگیری/کارت
+    if (SKIP_BEFORE.test(before) && !m[3]) continue;                                                       // مانده، کد پیگیری، ...
+    if (/(مانده|موجودی|باقیمانده)\s*[:：]?\s*[+\-]?\s*$/.test(before)) continue;                           // مانده حتی با ریال
+    let value = Number(numText);
+    if (!Number.isFinite(value) || value <= 0) continue;
+    value *= { "هزار": 1e3, "میلیون": 1e6, "میلیارد": 1e9 }[m[2]] || 1;
+    const unit = m[3] || "";
+    let score = 0;
+    if (unit) score += 3;
+    if (m[2]) score += 1;
+    if (/,/.test(m[1])) score += 1;                                  // جداکننده‌ی هزارگان
+    if (AMOUNT_KEYWORDS.test(before.slice(-16))) score += 3;
+    if (/[+\-]\s*$/.test(before)) score += 1;
+    cands.push({ value, unit, hasMult: !!m[2], start, end, score, sign: /\+\s*$/.test(before) ? "+" : /-\s*$/.test(before) ? "-" : "" });
+  }
+  if (!cands.length) return null;
+  return cands.reduce((best, c) => (c.score > best.score ? c : best), cands[0]);   // برابر بودن امتیاز → اولین عدد
+}
+function pickType(raw, amountPos, sign) {
+  if (sign === "+") return "income";
+  if (sign === "-") return "expense";
+  const hits = [];
+  for (const [re, type] of [[INCOME_RE, "income"], [EXPENSE_RE, "expense"]]) { re.lastIndex = 0; let k; while ((k = re.exec(raw))) hits.push({ type, dist: Math.abs(k.index - amountPos) }); }
+  if (!hits.length) return "expense";
+  hits.sort((a, b) => a.dist - b.dist);
+  return hits[0].type;   // نزدیک‌ترین کلمه‌ی کلیدی به مبلغ تعیین می‌کند (نه ترتیب بازنویسی)
+}
+/* opts.voice: متن گفتاری است. فقط در این حالت «۳۵۰ تومن» (بدون هزار/میلیون) به‌صورت حدسی ۳۵۰ هزار تومان گرفته می‌شود و scaleGuessed=true برمی‌گردد.
+   برای پیامک بانکی هیچ حدس مقیاسی انجام نمی‌شود؛ عدد بدون واحد ریال فرض می‌شود. */
+export function parseBankSms(text, opts = {}) {
   const raw = String(text || "").trim();
-  const normalized = normalizeDigitsText(raw).replace(/[٬,،]/g, "");
-  const amountMatch = normalized.match(/(\d+(?:\.\d+)?)\s*(میلیارد|میلیون|هزار)?\s*(تومان|تومن|ریال)?/);
-  let amount = null;
-  let fromWords = false;
-  if (amountMatch) {
-    amount = Number(amountMatch[1]);
-    const mult = { "هزار": 1e3, "میلیون": 1e6, "میلیارد": 1e9 }[amountMatch[2]] || 1;
-    amount *= mult;
-    if (amountMatch[3] === "تومان" || amountMatch[3] === "تومن") {
-      // In spoken Persian, "۳۵۰ تومن" is commonly shorthand for 350 thousand Toman.
-      if (!amountMatch[2] && amount < 10000) amount *= 1000;
-      amount *= 10;
+  const normalized = normalizeDigitsText(raw).replace(/[٬،]/g, ",");
+  const pick = pickAmount(normalized);
+  let amount = null, fromWords = false, scaleGuessed = false, pos = 0, sign = "";
+  if (pick) {
+    amount = pick.value; pos = pick.start; sign = pick.sign;
+    if (pick.unit === "تومان" || pick.unit === "تومن") {
+      if (opts.voice && !pick.hasMult && amount < 10000) { amount *= 1000; scaleGuessed = true; }
+      amount *= 10;   // تومان → ریال
     }
   }
   if (!amount || !Number.isFinite(amount)) {
     const wordAmount = persianWordsToNumber(normalized);
-    if (wordAmount !== null && wordAmount > 0) { amount = wordAmount; fromWords = true; }
+    if (wordAmount !== null && wordAmount > 0) { amount = wordAmount; fromWords = true; if (/تومان|تومن/.test(normalized)) amount *= 10; }
   }
-  if (amount === null) {
-    const fallback = normalized.match(/\d+/);
-    if (fallback) amount = Number(fallback[0]);
-  }
-  let type = "expense";
-  if (/واریز|دریافت|حقوق|دستمزد|درآمد|طلب|credit|deposit|income/i.test(raw)) type = "income";
-  if (/برداشت|خرید|خرج|پرداخت|هزینه|دادم|داد|کرایه|بنزین|رستوران|شام|ناهار|debit|purchase|expense/i.test(raw)) type = "expense";
+  const type = pickType(raw, pos, sign);
   const CATEGORY_HINTS = [
     { re: /بنزین|سوخت|پمپ/, name: "بنزین" },
     { re: /رستوران|غذا|شام|ناهار|صبحانه|کافه|سوپرمارکت|خرید خوراک|بازار/, name: "خوراک و بازار" },
@@ -63,5 +99,5 @@ export function parseBankSms(text) {
     { re: /فروش|فروش کالا|فروش محصول/, name: "درآمد متفرقه" },
   ];
   const hint = CATEGORY_HINTS.find((h) => h.re.test(raw));
-  return { amount: amount && Number.isFinite(amount) ? Math.round(amount) : null, type, note: raw.replace(/\s+/g, " ").slice(0, 160), categoryHint: hint?.name, fromWords };
+  return { amount: amount && Number.isFinite(amount) ? Math.round(amount) : null, type, note: raw.replace(/\s+/g, " ").slice(0, 160), categoryHint: hint?.name, fromWords, scaleGuessed };
 }

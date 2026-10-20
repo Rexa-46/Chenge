@@ -1,3 +1,4 @@
+import { secureGet, secureRemove, secureSet } from "./nativeStorage.js";
 /* ---------------------------------------------------------
    امنیت رمز عددی: رمز هرگز به‌صورت متن ساده ذخیره نمی‌شود (هش + salt)،
    داخل فایل پشتیبان نمی‌رود و بعد از چند تلاش اشتباه موقتاً قفل می‌شود.
@@ -39,14 +40,54 @@ export async function verifyPin(input, { pin, pinHash, pinSalt }) {
   } catch {}
   return false;
 }
-export function readPinLock() {
-  try { const v = JSON.parse(localStorage.getItem(PIN_LOCK_KEY) || "null"); return { fails: Number(v?.fails) || 0, until: Number(v?.until) || 0 }; } catch { return { fails: 0, until: 0 }; }
-}
-export function clearPinLock() { try { localStorage.removeItem(PIN_LOCK_KEY); } catch {} }
-export function registerPinFail() {
-  const fails = readPinLock().fails + 1;
-  const until = fails >= PIN_FREE_TRIES ? Date.now() + Math.min(15 * 60, 30 * 2 ** (fails - PIN_FREE_TRIES)) * 1000 : 0;
-  const next = { fails, until };
+/* شمارنده‌ی تلاش‌های ناموفق:
+   - در حافظه + localStorage + (در APK) SecureStorage نگه‌داری می‌شود؛
+   - زمان قفل با ساعت دیواری و یک ساعت یکنواخت (performance.now) سنجیده می‌شود؛ عقب بردن ساعت گوشی (lastSeen)
+     و جلو بردن ساعت در همان اجرای برنامه (anchor) قفل را کوتاه نمی‌کند. */
+let _lock = null;
+let _anchor = null;   // { until, ms, perf } — فقط برای همین اجرای برنامه
+const normLock = (v) => ({ fails: Number(v?.fails) || 0, until: Number(v?.until) || 0, lastSeen: Number(v?.lastSeen) || 0 });
+function persistLock(next) {
+  _lock = next;
   try { localStorage.setItem(PIN_LOCK_KEY, JSON.stringify(next)); } catch {}
+  secureSet(PIN_LOCK_KEY, JSON.stringify(next)).catch(() => {});
+}
+export function readPinLock() {
+  if (_lock) return _lock;
+  try { _lock = normLock(JSON.parse(localStorage.getItem(PIN_LOCK_KEY) || "null")); } catch { _lock = normLock(null); }
+  return _lock;
+}
+// خواندن نسخه‌ی SecureStorage و ادغام با نسخه‌ی محلی (بیشترین شمارش/قفل برنده است)
+export async function hydratePinLock() {
+  const local = readPinLock();
+  try {
+    const raw = await secureGet(PIN_LOCK_KEY);
+    if (raw) {
+      const sec = normLock(JSON.parse(raw));
+      _lock = { fails: Math.max(local.fails, sec.fails), until: Math.max(local.until, sec.until), lastSeen: Math.max(local.lastSeen, sec.lastSeen) };
+    }
+  } catch {}
+  return _lock;
+}
+export function lockRemainingMs(lock = readPinLock()) {
+  const eff = Math.max(Date.now(), lock.lastSeen || 0);         // ساعت به عقب برده شده → نادیده
+  let rem = Math.max(0, (lock.until || 0) - eff);
+  if (_anchor && _anchor.until === lock.until) rem = Math.max(rem, _anchor.ms - (performance.now() - _anchor.perf));   // ساعت به جلو برده شده → نادیده
+  return Math.max(0, rem);
+}
+export function touchPinLock() { const l = readPinLock(); const now = Date.now(); if (now > l.lastSeen) persistLock({ ...l, lastSeen: now }); }
+export function clearPinLock() {
+  _lock = normLock(null); _anchor = null;
+  try { localStorage.removeItem(PIN_LOCK_KEY); } catch {}
+  secureRemove(PIN_LOCK_KEY).catch(() => {});
+}
+export function registerPinFail() {
+  const cur = readPinLock();
+  const fails = cur.fails + 1;
+  const now = Math.max(Date.now(), cur.lastSeen || 0);
+  const ms = fails >= PIN_FREE_TRIES ? Math.min(15 * 60, 30 * 2 ** (fails - PIN_FREE_TRIES)) * 1000 : 0;
+  const next = { fails, until: ms ? now + ms : 0, lastSeen: now };
+  _anchor = ms ? { until: next.until, ms, perf: performance.now() } : null;
+  persistLock(next);
   return next;
 }

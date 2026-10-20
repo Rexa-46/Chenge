@@ -10,6 +10,9 @@ import { useStyles } from "../../theme/styles.js";
 
 /* مدیریت دسترسی: هر مجوزِ گوشی فقط وقتی کاربر «اجازه بده» را بزند از اندروید درخواست می‌شود */
 const smsPlugin = async () => { const mod = await import("capacitor-sms-inbox"); return mod.SMSInboxReader || mod.SmsInboxReader || mod.SMSInbox || mod.SmsInbox || mod.default; };
+const speechPlugin = async () => (await import("@capgo/capacitor-speech-recognition")).SpeechRecognition;
+// ساختار پاسخ افزونه بین نسخه‌ها فرق می‌کند (speechRecognition / microphone / ...): همه‌ی مقدارهای مجوزِ برگشتی باید «granted» باشند؛ پاسخ خالی یعنی نامشخص، نه اجازه‌داده‌شده
+const micGranted = (r) => { const vals = Object.values(r || {}).filter((v) => typeof v === "string"); return vals.length > 0 && vals.every((v) => v === "granted"); };
 const PERMS = [
   { key: "notif", title: "اعلان سررسیدها", subtitle: "نمایش اعلان چک، قبض، قسط وام و یادآوری‌ها", Icon: BellRing,
     check: async () => (await LocalNotifications.checkPermissions()).display === "granted",
@@ -18,8 +21,8 @@ const PERMS = [
     check: async () => (await (await smsPlugin()).checkPermissions()).sms === "granted",
     ask: async () => (await (await smsPlugin()).requestPermissions()).sms === "granted" },
   { key: "mic", title: "میکروفون (ثبت صوتی)", subtitle: "ثبت تراکنش با گفتار", Icon: Mic,
-    check: async () => { const { SpeechRecognition } = await import("@capgo/capacitor-speech-recognition"); const r = await SpeechRecognition.checkPermissions(); return (r.speechRecognition || r.permission) === "granted"; },
-    ask: async () => { const { SpeechRecognition } = await import("@capgo/capacitor-speech-recognition"); const r = await SpeechRecognition.requestPermissions(); return (r.speechRecognition || r.permission) === "granted"; } },
+    check: async () => micGranted(await (await speechPlugin()).checkPermissions()),
+    ask: async () => { const sp = await speechPlugin(); await sp.requestPermissions(); return micGranted(await sp.checkPermissions()); } },
 ];
 
 export function AccessView({ settings, setSettings }) {

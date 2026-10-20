@@ -18,11 +18,18 @@ import { uid } from "../../utils/id.js";
 /* ---------------------------------------------------------
    Checks Manager
 --------------------------------------------------------- */
-export function ChecksManager({ checks, setChecks, accounts = [], categories = [], setTransactions, focusId, setFocusId }) {
+export function ChecksManager({ checks, setChecks, accounts = [], categories = [], addCategory, setTransactions, focusId, setFocusId }) {
   const st = useStyles();
   const [expandedId, setExpandedId] = useState(null);
   useFocusItem(focusId, setFocusId, setExpandedId);
-  const [form, setForm] = useState({ type: "received", payee: "", amount: "", dueDate: todayISO(), note: "", sayadId: "", checkNumber: "", accountId: "" });
+  const [form, setForm] = useState({ type: "received", payee: "", amount: "", dueDate: todayISO(), note: "", sayadId: "", checkNumber: "", accountId: "", countInPnl: true });
+  // چک «درآمد/هزینه‌ی واقعی» در گزارش‌ها می‌آید؛ چک تسویه‌ی طلب/بدهی قبلی فقط موجودی را جابه‌جا می‌کند
+  const CHECK_INCOME_CAT = "cat-check-income", CHECK_EXPENSE_CAT = "cat-check-expense";
+  const ensureCheckCat = (income) => {
+    const id = income ? CHECK_INCOME_CAT : CHECK_EXPENSE_CAT;
+    if (!categories.some((c) => c.id === id)) addCategory?.({ id, name: income ? "درآمد چک" : "هزینه چک", kind: income ? "income" : "expense" });
+    return id;
+  }
   function add() {
     if (!form.payee || !form.amount || !form.checkNumber || form.sayadId.length < 16 || form.sayadId.length > 20) return;
     setChecks((p) => [{ id: uid(), ...form, amount: Number(form.amount), status: "pending", createdAt: new Date().toISOString() }, ...p]);
@@ -65,6 +72,10 @@ export function ChecksManager({ checks, setChecks, accounts = [], categories = [
         <label style={st.label}>تاریخ سررسید</label>
         <JalaliDateInput value={form.dueDate} onChange={(v) => setForm({ ...form, dueDate: v })} style={st.input} />
         <input placeholder="یادداشت (اختیاری)" value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} style={st.input} />
+        <label style={{ display: "flex", gap: 8, alignItems: "flex-start", fontSize: 12, lineHeight: 1.8, marginBottom: 10, cursor: "pointer" }}>
+          <input type="checkbox" checked={form.countInPnl !== false} onChange={(e) => setForm({ ...form, countInPnl: e.target.checked })} style={{ width: 18, height: 18, marginTop: 3, flexShrink: 0 }} />
+          <span>{form.type === "received" ? "این چک درآمد من است و در گزارش درآمد بیاید" : "این چک هزینه‌ی من است و در گزارش هزینه بیاید"}<br /><span style={{ color: "#8a8194" }}>اگر تسویه‌ی طلب/بدهی قبلی است تیک را بردار؛ آن‌وقت فقط موجودی حساب تغییر می‌کند.</span></span>
+        </label>
         <button onClick={add} disabled={!canAdd} style={{ ...st.primaryBtn, opacity: canAdd ? 1 : 0.5 }}>ثبت چک</button>
       </div>
       <div style={{ ...st.card, padding: "4px 12px" }}>
@@ -94,12 +105,12 @@ export function ChecksManager({ checks, setChecks, accounts = [], categories = [
                 </button>
                 <select value={c.status} onChange={(e) => {
                   const next = e.target.value;
-                  setChecks((p) => p.map((x) => x.id === c.id ? { ...x, status: next, ...(next === "pending" ? { linkedTransactionId: "" } : {}) } : x));
+                  setChecks((p) => p.map((x) => x.id === c.id ? { ...x, status: next, settledAt: next === "cashed" || next === "paid" ? todayISO() : "", ...(next === "pending" ? { linkedTransactionId: "" } : {}) } : x));
                   setTransactions?.((prev) => {
                     let list = prev.filter((t) => !(t.sourceType === "check" && t.sourceId === c.id));
-                    if (next === "cashed" && c.accountId) list = postOnce(list, { type: "income", amount: c.amount, accountId: c.accountId, date: c.dueDate, time: "12:00", note: `وصول چک ${c.checkNumber || c.sayadId} - ${c.payee}`, sourceType: "check", sourceId: c.id, checkId: c.id, categoryId: "cat-check-received", isPnlExcluded: true });
+                    if (next === "cashed" && c.accountId) list = postOnce(list, { type: "income", amount: c.amount, accountId: c.accountId, date: todayISO(), time: new Date().toTimeString().slice(0, 5), note: `وصول چک ${c.checkNumber || c.sayadId} - ${c.payee}`, sourceType: "check", sourceId: c.id, checkId: c.id, ...(c.countInPnl === true ? { categoryId: ensureCheckCat(true), isPnlExcluded: false } : { categoryId: "cat-check-received", isPnlExcluded: true }) });
                     if (next === "bounced") return list;
-                    if (next === "paid" && c.accountId) list = postOnce(list, { type: "expense", amount: c.amount, accountId: c.accountId, date: c.dueDate, time: "12:00", note: `پرداخت چک ${c.checkNumber || c.sayadId} - ${c.payee}`, sourceType: "check", sourceId: c.id, checkId: c.id, categoryId: "cat-check-paid", isPnlExcluded: true });
+                    if (next === "paid" && c.accountId) list = postOnce(list, { type: "expense", amount: c.amount, accountId: c.accountId, date: todayISO(), time: new Date().toTimeString().slice(0, 5), note: `پرداخت چک ${c.checkNumber || c.sayadId} - ${c.payee}`, sourceType: "check", sourceId: c.id, checkId: c.id, ...(c.countInPnl === true ? { categoryId: ensureCheckCat(false), isPnlExcluded: false } : { categoryId: "cat-check-paid", isPnlExcluded: true }) });
                     return list;
                   });
                 }} style={{ fontSize: 11, borderRadius: 6, border: "1px solid #ddd" }}>

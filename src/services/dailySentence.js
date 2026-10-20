@@ -1,6 +1,7 @@
 import { Capacitor, CapacitorHttp } from "@capacitor/core";
 
 import { withTimeout } from "../utils/async.js";
+import { fallbackSentenceFor } from "./fallbackSentences.js";
 import { todayISO } from "../utils/dates.js";
 
 /* ---------------------------------------------------------
@@ -82,7 +83,11 @@ export function resolveTodaySentence() {
       const out = { date: today, ...pick, source: "online" };
       writeJson(SENTENCE_CACHE_KEY, out);
       return out;
-    } catch { return cache && cache.en ? cache : null; }   // اینترنت نبود/کند بود: آخرین جمله‌ی ذخیره‌شده، وگرنه ورود بدون جمله
+    } catch {
+      // اینترنت نبود/کند بود: آخرین جمله‌ی ذخیره‌شده، وگرنه جمله‌ی محلی همان روز (بدون ذخیره، تا فردا دوباره آنلاین امتحان شود)
+      if (cache && cache.en) return cache;
+      return { date: today, ...fallbackSentenceFor(today), source: "local" };
+    }
   })();
   return _todaySentencePromise;
 }

@@ -16,6 +16,7 @@ import { useStyles } from "../../theme/styles.js";
 import { daysUntil, faLongDate, jalaliParts, todayISO } from "../../utils/dates.js";
 import { toFaInt } from "../../utils/format.js";
 import { uid } from "../../utils/id.js";
+import { useBackClose } from "../../hooks/useBackClose.js";
 import { toBody } from "../../utils/portal.js";
 
 /* سررسید قسط بعدی نسبت به ماه شمسی جاری: «ماه جاری» / «ماه بعد» / عقب‌افتاده / نام ماه */
@@ -134,6 +135,7 @@ export function LoansManager({ loans, setLoans, accounts = [], categories = [], 
   }
 
   const payLoan = pay ? loans.find((x) => x.id === pay.id) : null;
+  useBackClose(!!pay, () => setPay(null));   // دکمه‌ی برگشت اندروید پنجره‌ی ثبت قسط را می‌بندد
 
   return (
     <div>

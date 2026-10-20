@@ -4,7 +4,7 @@ import { Capacitor } from "@capacitor/core";
 import { Fingerprint } from "lucide-react";
 
 import { RexaLogo } from "../brand/RexaLogo.jsx";
-import { clearPinLock, readPinLock, registerPinFail, verifyPin } from "../../services/pinLock.js";
+import { clearPinLock, hydratePinLock, lockRemainingMs, readPinLock, registerPinFail, touchPinLock, verifyPin } from "../../services/pinLock.js";
 import { BRAND, FONT } from "../../theme/palette.js";
 import { toFaInt } from "../../utils/format.js";
 
@@ -16,16 +16,17 @@ export function LockScreen({ pin, pinHash, pinSalt, onUnlock, biometricEnabled }
   const isNative = typeof Capacitor !== "undefined" && Capacitor.isNativePlatform && Capacitor.isNativePlatform();
   const [now, setNow] = useState(Date.now());
   const [lock, setLock] = useState(() => readPinLock());
-  const remaining = Math.max(0, Math.ceil(((lock.until || 0) - now) / 1000));
+  const remaining = Math.ceil(lockRemainingMs(lock) / 1000);   // now فقط برای رندر دوباره‌ی شمارش معکوس است
   useEffect(() => {
     if (!remaining) return;
     const tm = setInterval(() => setNow(Date.now()), 500);
     return () => clearInterval(tm);
   }, [remaining > 0]);
+  useEffect(() => { hydratePinLock().then((l) => { setLock({ ...l }); touchPinLock(); }); }, []);
   async function submitPin() {
     if (remaining > 0 || !val) return;
     if (await verifyPin(val, { pin, pinHash, pinSalt })) { clearPinLock(); onUnlock(); return; }
-    setLock(registerPinFail()); setNow(Date.now()); setErr(true); setVal("");
+    setLock({ ...registerPinFail() }); setNow(Date.now()); setErr(true); setVal("");
   }
 
   async function tryBiometric() {
@@ -38,7 +39,7 @@ export function LockScreen({ pin, pinHash, pinSalt, onUnlock, biometricEnabled }
           await BiometricAuth.authenticate({
             reason: "برای باز کردن Rexa هویتت رو تایید کن",
             cancelTitle: "لغو",
-            allowDeviceCredential: true,
+            allowDeviceCredential: false,   // رمز/الگوی گوشی نباید رمز Rexa را دور بزند
           });
           onUnlock();
           return;

@@ -11,7 +11,10 @@ import { toFaInt } from "../utils/format.js";
    و پنجره‌ی ثبت همان قسط نمایش داده می‌شود.
 --------------------------------------------------------- */
 const DUE_NOTIF_BASE = 710000000;
-const DUE_NOTIF_MAX = 60;
+// اندروید تا صدها آلارم هم‌زمان را نگه می‌دارد؛ iOS فقط ۶۴ اعلان. بنابراین سقف بر اساس پلتفرم است.
+const DUE_NOTIF_MAX = Capacitor.getPlatform() === "ios" ? 60 : 300;
+const LOAN_LOOKAHEAD = 12;   // برای هر وام اعلان چند قسط بعدی ساخته می‌شود (نه فقط قسط بعدی)، تا با باز نکردن برنامه اعلان‌ها تمام نشوند
+const PUSH_HORIZON_DAYS = 400;
 const LOAN_ACTION_TYPE = "rexa-loan-due";
 const LOAN_ACTION_PAY = "pay";
 
@@ -49,14 +52,14 @@ export async function listenNotificationActions() {
 
 export async function rescheduleDueNotifications({ enabled, checks, bills, loans, reminders, checkDays }) {
   const pending = await LocalNotifications.getPending();
-  const mine = (pending.notifications || []).filter((n) => n.id >= DUE_NOTIF_BASE && n.id < DUE_NOTIF_BASE + 1000);
+  const mine = (pending.notifications || []).filter((n) => n.id >= DUE_NOTIF_BASE && n.id < DUE_NOTIF_BASE + 5000);
   if (mine.length) await LocalNotifications.cancel({ notifications: mine.map((n) => ({ id: n.id })) });
   if (!enabled) return;
   const items = [];
   const push = (when, title, body, extra) => {
     if (!when || isNaN(when.getTime())) return;
     const t = when.getTime();
-    if (t > Date.now() + 10000 && t < Date.now() + 120 * 86400000) items.push({ when, title, body, extra });
+    if (t > Date.now() + 10000 && t < Date.now() + PUSH_HORIZON_DAYS * 86400000) items.push({ when, title, body, extra });
   };
   (checks || []).filter((c) => c.status === "pending" && c.dueDate).forEach((c) => {
     const what = `چک ${c.type === "received" ? "دریافتی" : "پرداختی"} ${c.payee || ""} — ${toFaInt(c.amount)} ریال`;
@@ -68,19 +71,23 @@ export async function rescheduleDueNotifications({ enabled, checks, bills, loans
     push(atNine(b.dueDate, 1), "یادآوری سررسید قبض", `${what} — فردا سررسید است`);
     push(atNine(b.dueDate, 0), "امروز سررسید قبض است", what);
   });
-  // قسط وام: چه وام تازه باشد چه «خرج‌شده»، هر قسط پرداخت‌نشده سررسید و اعلان دارد
+  // قسط وام: چه وام تازه باشد چه «خرج‌شده»، اقساط پرداخت‌نشده‌ی بعدی (تا LOAN_LOOKAHEAD قسط) سررسید و اعلان دارند
   (loans || []).filter((l) => l.startDate && Number(l.paidCount || 0) < Number(l.installments || 0)).forEach((l) => {
-    const due = loanDueDate(l);
-    const seq = Number(l.paidCount || 0) + 1;
-    const what = `قسط ${seq} ${l.title || "وام"}${l.monthlyPayment ? ` — ${toFaInt(l.monthlyPayment)} ریال` : ""}`;
-    const extra = { loanId: String(l.id), seq };
-    const dueAt = atNine(due, 0);
-    if (dueAt && dueAt.getTime() < Date.now() - 60000) {
-      push(nextNine(), "قسط وام عقب افتاده", `${what} — سررسید گذشته؛ برای ثبت پرداخت لمس کنید`, extra);
-      return;
+    const paid = Number(l.paidCount || 0);
+    const last = Math.min(Number(l.installments || 0), paid + LOAN_LOOKAHEAD);
+    for (let k = paid; k < last; k++) {
+      const due = loanDueDate(l, k);
+      const seq = k + 1;
+      const what = `قسط ${seq} ${l.title || "وام"}${l.monthlyPayment ? ` — ${toFaInt(l.monthlyPayment)} ریال` : ""}`;
+      const extra = { loanId: String(l.id), seq };
+      const dueAt = atNine(due, 0);
+      if (dueAt && dueAt.getTime() < Date.now() - 60000) {
+        if (k === paid) push(nextNine(), "قسط وام عقب افتاده", `${what} — سررسید گذشته؛ برای ثبت پرداخت لمس کنید`, extra);   // فقط قسط جاری عقب‌افتاده یادآوری می‌شود
+        continue;
+      }
+      push(atNine(due, 1), "یادآوری سررسید قسط", `${what} — فردا سررسید است`, extra);
+      push(dueAt, "امروز سررسید قسط است", `${what} — برای ثبت پرداخت لمس کنید`, extra);
     }
-    push(atNine(due, 1), "یادآوری سررسید قسط", `${what} — فردا سررسید است`, extra);
-    push(dueAt, "امروز سررسید قسط است", `${what} — برای ثبت پرداخت لمس کنید`, extra);
   });
   (reminders || []).filter((r) => !r.done && r.date).forEach((r) => push(atNine(r.date, 0), "یادآوری Rexa", r.text || ""));
   const list = items.sort((a, b) => a.when - b.when).slice(0, DUE_NOTIF_MAX);
@@ -92,8 +99,18 @@ export async function rescheduleDueNotifications({ enabled, checks, bills, loans
   try { await LocalNotifications.registerActionTypes({ types: [{ id: LOAN_ACTION_TYPE, actions: [{ id: LOAN_ACTION_PAY, title: "ثبت پرداخت قسط" }] }] }); } catch {}
   await LocalNotifications.schedule({
     notifications: list.map((it, i) => ({
-      id: DUE_NOTIF_BASE + i, title: it.title, body: it.body, schedule: { at: it.when }, channelId: "rexa-due",
+      id: DUE_NOTIF_BASE + i, title: it.title, body: it.body, schedule: { at: it.when, allowWhileIdle: true }, channelId: "rexa-due",
       ...(it.extra ? { actionTypeId: LOAN_ACTION_TYPE, extra: it.extra } : {}),
     })),
   });
+}
+
+/* اندروید ۱۲ به بالا: بدون «آلارم و یادآور دقیق» اعلان‌ها ممکن است با تأخیر (حتی دقایق) برسند.
+   وضعیت را می‌خوانیم و در صورت نیاز، کاربر را به صفحه‌ی تنظیمات همان مجوز می‌بریم. */
+export async function exactAlarmStatus() {
+  if (!Capacitor.isNativePlatform()) return "granted";
+  try { const r = await LocalNotifications.checkExactNotificationSetting(); return r?.exact_alarm || "granted"; } catch { return "granted"; }
+}
+export async function askExactAlarm() {
+  try { const r = await LocalNotifications.changeExactNotificationSetting(); return r?.exact_alarm || "denied"; } catch { return "denied"; }
 }

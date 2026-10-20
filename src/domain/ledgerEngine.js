@@ -180,7 +180,8 @@ export function transactionToJournal(tx) {
      * اسناد دریافتنی ↓
      */
     else if (
-      tx.sourceType === 'check'
+      tx.sourceType === 'check' &&
+      tx.isPnlExcluded
     ) {
       contraAccount =
         LEDGER_ACCOUNTS.RECEIVABLE;
@@ -363,7 +364,8 @@ export function transactionToJournal(tx) {
      * -------------------------------------------------------
      */
     if (
-      tx.sourceType === 'check'
+      tx.sourceType === 'check' &&
+      tx.isPnlExcluded
     ) {
       return journalEntry({
         date: tx.date,
@@ -533,12 +535,46 @@ export function transactionToJournal(tx) {
 }
 
 /**
- * بازسازی Ledger از روی تمام تراکنش‌ها
+ * مانده‌ی اولیه‌ی «وام خرج‌شده»: دریافت این وام در برنامه ثبت نمی‌شود (پولش قبلاً خرج شده)،
+ * اما اقساطش بدهی وام را بدهکار می‌کنند؛ بدون سند اولیه بدهی منفی می‌شد.
+ *
+ * بدهکار: حقوق صاحب (مانده‌ی اولیه)
+ * بستانکار: بدهی وام ← باقی‌مانده‌ی اصل در لحظه‌ی ثبت وام
+ */
+export function loanOpeningEntries(loans = []) {
+  return (loans || [])
+    .filter((l) => l && l.spent)
+    .map((l) => {
+      const n = Number(l.installments || 0);
+      const monthly = Number(l.monthlyPayment || 0);
+      const principal = Number(l.principal || 0);
+      const interestEach = n ? Math.max(0, n * monthly - principal) / n : 0;
+      const principalPart = Math.max(0, monthly - interestEach);   // همان فرمول loanInstallmentTx
+      const opening = Math.max(0, Math.round(principal - Number(l.prepaidCount || 0) * principalPart));
+      if (!opening) return null;
+      return journalEntry({
+        id: `je-loan-opening-${l.id}`,
+        date: l.startDate,
+        sourceType: 'loan_opening',
+        sourceId: l.id,
+        memo: `مانده‌ی اولیه‌ی وام خرج‌شده «${l.title || ''}»`,
+        lines: [
+          { account: LEDGER_ACCOUNTS.EQUITY, debit: opening },
+          { account: LEDGER_ACCOUNTS.LOAN_LIABILITY, credit: opening },
+        ],
+      });
+    })
+    .filter(Boolean);
+}
+
+/**
+ * بازسازی Ledger از روی تمام تراکنش‌ها (و مانده‌ی اولیه‌ی وام‌های خرج‌شده)
  */
 export function rebuildLedger(
-  transactions = []
+  transactions = [],
+  loans = []
 ) {
-  return transactions
+  const entries = transactions
     .map((transaction) => {
       try {
         return transactionToJournal(
@@ -555,4 +591,7 @@ export function rebuildLedger(
       }
     })
     .filter(Boolean);
+  let openings = [];
+  try { openings = loanOpeningEntries(loans); } catch (error) { console.warn('Rexa ledger: loan opening skipped', error); }
+  return [...openings, ...entries];
 }

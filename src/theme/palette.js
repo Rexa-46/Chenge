@@ -1,9 +1,10 @@
 /* ---------------------------------------------------------
    Theme / palette
    BRAND is intentionally mutable: App() re-assigns its keys from the
-   chosen preset on every render, so every component below (which reads
-   BRAND.xxx directly at render time) automatically reflects the user's
-   color choice without needing a context/hook everywhere.
+   chosen preset only when the theme color changes (before children render)
+   and remounts its tree via a key, so every component below (which reads
+   BRAND.xxx directly at render time) reflects the user's color choice
+   without needing a context/hook everywhere.
 --------------------------------------------------------- */
 export const COLOR_PRESETS = {
   purple: { name: "بنفش کلاسیک", header: "#3E1461", mauve: "#A65475", darkgreen: "#1B6B2C", green: "#1E8449", violet: "#6C3FA0", teal: "#4E9AA0", gold: "#A98A3B", crimson: "#B01E4A", orange: "#C56A1F", fab: "#28C76F" },

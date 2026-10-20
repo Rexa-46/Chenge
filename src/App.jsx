@@ -28,13 +28,15 @@ import { useGithubSync } from "./hooks/useGithubSync.js";
 import { LocalNotifications } from "@capacitor/local-notifications";
 import { AlarmsSheet } from "./components/sheets/AlarmsSheet.jsx";
 import { buildAlarms } from "./domain/alarms.js";
-import { listenNotificationActions, onLoanPayRequest, requestLoanPay, rescheduleDueNotifications } from "./services/notifications.js";
+import { askExactAlarm, exactAlarmStatus, listenNotificationActions, onLoanPayRequest, requestLoanPay, rescheduleDueNotifications } from "./services/notifications.js";
+import { decryptSnapshot, encryptSnapshot } from "./services/githubSync.js";
+import { isEncryptedBackup, validateBackup } from "./services/backupValidate.js";
 import { makePinRecord, withoutPin } from "./services/pinLock.js";
 import { loadKey, saveKey } from "./services/storage.js";
 import { openExternalUrl } from "./services/updates.js";
 import { ThemeCtx } from "./theme/ThemeContext.js";
 import { BRAND, COLOR_PRESETS, FONT, THEME } from "./theme/palette.js";
-import { addDays, addMonths, faMonthYear, jalaliYear, jf, todayISO } from "./utils/dates.js";
+import { addDays, addMonths, jalaliParts, jalaliYear, jf, lastJalaliMonthEnds, parseISO, todayISO } from "./utils/dates.js";
 import { toFaInt } from "./utils/format.js";
 import { uid } from "./utils/id.js";
 import { parseBankSms } from "./utils/smsParser.js";
@@ -47,12 +49,14 @@ import { SUBVIEW_TITLES } from "./views/subViewTitles.js";
 import { TransactionsView } from "./views/transactions/TransactionsView.jsx";
 
 // آخرین وضعیت (تب و صفحه‌ی باز) هنگام بسته شدن ذخیره می‌شود و با باز شدن برنامه برمی‌گردد
+const RELOCK_AFTER_MS = 30 * 1000;
 const LAST_VIEW_KEY = "rexa:lastView";
 const VALID_TABS = ["home", "transactions", "operations", "checks", "reports"];
 const readLastView = () => { try { return JSON.parse(localStorage.getItem(LAST_VIEW_KEY) || "null") || {}; } catch { return {}; } };
 
 export default function App() {
   const [loaded, setLoaded] = useState(false);
+  const [loadError, setLoadError] = useState(null);   // خطای خواندن از دیتابیس؛ تا رفع نشود «بارگذاری‌شده» حساب نمی‌شود و چیزی بازنویسی نمی‌شود
   const [settings, setSettings] = useState(seedSettings());
   const [unlocked, setUnlocked] = useState(false);
   const [dailySplash, setDailySplash] = useState(true); // هر بار باز شدن برنامه نمایش داده می‌شود؛ جمله تا پایان همان روز ثابت است
@@ -129,7 +133,7 @@ export default function App() {
     setCategories(normalizeCategoriesForHierarchy((c || seedCategories()).map((x) => ({ ...x, active: x.active !== false }))));
     const migratedTransactions = migrateTransactions(t || [], ln);
     setTransactions(migratedTransactions);
-    setJournalEntries(rebuildLedger(migratedTransactions));
+    setJournalEntries(rebuildLedger(migratedTransactions, ln));
     setBudgets(b || []);
     setLoans(ln); setChecks(ck); setBills(bl); setAssets(as); setRecurring(rc); setFavorites(fv);
     setMembers(mb); setEvents(ev); setProjects(pj); setFiscalPeriods(fp);
@@ -137,22 +141,26 @@ export default function App() {
     setPersons(ps || []); setDebts(db || []); setCurrencies(cu || []); setGoals(gl || []);
   }, []);
 
-  useEffect(() => {
-    (async () => {
+  const initialLoad = useCallback(async () => {
+    setLoadError(null);
+    try {
       const s = await loadKey("hs:settings", seedSettings(), false);
+      await reloadAll(s.sharedFamily);   // همه‌ی کلیدها خوانده می‌شوند و فقط در صورت موفقیت کامل state پر می‌شود
       setSettings(s);
       setShortcuts(s.shortcuts || []); // بازیابی میانبرهای ذخیره‌شده (قبلاً با باز شدن برنامه پاک می‌شدند)
-      await reloadAll(s.sharedFamily);
       setLoaded(true);
-    })();
-    // eslint-disable-next-line
-  }, []);
+    } catch (e) {
+      console.error("load fail", e);
+      setLoadError(String(e?.message || e || "خطای نامشخص"));
+    }
+  }, [reloadAll]);
+  useEffect(() => { initialLoad(); }, [initialLoad]);
 
   useEffect(() => { if (loaded) saveKey("hs:settings", settings, false); }, [settings, loaded]);
   useEffect(() => { if (loaded) saveKey("hs:accounts", accounts, shared); }, [accounts, loaded, shared]);
   useEffect(() => { if (loaded) saveKey("hs:categories", categories, shared); }, [categories, loaded, shared]);
   useEffect(() => { if (loaded) saveKey("hs:transactions", transactions, shared); }, [transactions, loaded, shared]);
-  useEffect(() => { if (loaded) setJournalEntries(rebuildLedger(transactions)); }, [transactions, loaded]);
+  useEffect(() => { if (loaded) setJournalEntries(rebuildLedger(transactions, loans)); }, [transactions, loans, loaded]);
   useEffect(() => { if (loaded) saveKey("hs:budgets", budgets, shared); }, [budgets, loaded, shared]);
   useEffect(() => { if (loaded) saveKey("hs:loans", loans, shared); }, [loans, loaded, shared]);
   // هر حساب بانکی/کارت در «حساب‌ها و کارت‌ها» یک حساب هم‌نام در درخت «حساب‌ها ← بانک‌ها» دارد (برای اتصال به موجودی واقعی)
@@ -179,27 +187,40 @@ export default function App() {
   useEffect(() => { if (loaded) saveKey("hs:goals", goals, shared); }, [goals, loaded, shared]);
   useEffect(() => { if (loaded) setSettings((prev) => prev.shortcuts === shortcuts ? prev : { ...prev, shortcuts }); }, [shortcuts, loaded]);
 
-  // process recurring templates once after load
-  useEffect(() => {
-    if (!loaded) return;
+  // تراکنش‌های تکرارشونده: هنگام بارگذاری، هر بار برگشت به برنامه و نیمه‌شب (تغییر روز) اجرا می‌شود.
+  // سقف ۱۲۰ دوره برای هر قالب فقط محافظ حلقه‌ی بی‌پایان است؛ ماهانه‌ها بر اساس ماه شمسی و روزِ ثابتِ شروع محاسبه می‌شوند.
+  const recurringRef = useRef(recurring); recurringRef.current = recurring;
+  const processRecurring = useCallback(() => {
+    const today = todayISO();
     let changed = false;
     const newTx = [];
-    const updated = recurring.map((r) => {
-      if (!r.active) return r;
-      let next = r.nextDate; let guard = 0; let rr = { ...r };
-      while (next <= todayISO() && guard < 24) {
-        newTx.push({ id: uid(), type: rr.type, amount: rr.amount, categoryId: rr.categoryId, accountId: rr.accountId, date: next, note: rr.note || "تراکنش تکرارشونده", tags: ["تکرارشونده"], createdAt: new Date().toISOString(), recurringId: rr.id });
-        next = rr.interval === "weekly" ? addDays(next, 7) : addMonths(next, 1);
+    const updated = recurringRef.current.map((r) => {
+      if (!r.active || !r.nextDate) return r;
+      const anchorDay = jalaliParts(parseISO(r.startDate || r.nextDate)).day;
+      let next = r.nextDate; let guard = 0;
+      while (next <= today && guard < 120) {
+        newTx.push({ id: uid(), type: r.type, amount: r.amount, categoryId: r.categoryId, accountId: r.accountId, date: next, note: r.note || "تراکنش تکرارشونده", tags: ["تکرارشونده"], createdAt: new Date().toISOString(), recurringId: r.id });
+        next = r.interval === "weekly" ? addDays(next, 7) : addMonths(next, 1, anchorDay);
         guard++; changed = true;
       }
-      return { ...rr, nextDate: next };
+      return next === r.nextDate ? r : { ...r, nextDate: next };
     });
-    if (changed) {
-      setRecurring(updated);
-      setTransactions((prev) => [...newTx, ...prev]);
-    }
-    // eslint-disable-next-line
-  }, [loaded]);
+    if (!changed) return;
+    setRecurring(updated);
+    // اگر تراکنشی با همین قالب و تاریخ از قبل هست دوباره ساخته نمی‌شود
+    setTransactions((prev) => [...newTx.filter((n) => !prev.some((x) => x.recurringId === n.recurringId && x.date === n.date)), ...prev]);
+  }, []);
+  useEffect(() => { if (loaded) processRecurring(); }, [loaded, processRecurring]);
+  useEffect(() => {
+    if (!loaded) return;
+    const onVisible = () => { if (document.visibilityState === "visible") processRecurring(); };
+    document.addEventListener("visibilitychange", onVisible);
+    let appListener; let cancelled = false;
+    if (Capacitor.isNativePlatform()) CapacitorApp.addListener("appStateChange", ({ isActive }) => { if (isActive) processRecurring(); }).then((l) => { if (cancelled) l.remove?.(); else appListener = l; }).catch(() => {});
+    const msToMidnight = () => { const n = new Date(); return new Date(n.getFullYear(), n.getMonth(), n.getDate() + 1, 0, 0, 5) - n; };
+    let tm = setTimeout(function tick() { processRecurring(); tm = setTimeout(tick, msToMidnight()); }, msToMidnight());
+    return () => { cancelled = true; document.removeEventListener("visibilitychange", onVisible); appListener?.remove?.(); clearTimeout(tm); };
+  }, [loaded, processRecurring]);
 
   // تبدیل رمز قدیمی (متن ساده) به هش
   useEffect(() => {
@@ -221,7 +242,11 @@ export default function App() {
     try {
       const p = await LocalNotifications.requestPermissions();
       setNotifBlocked(p.display !== "granted");
-      if (p.display === "granted") rescheduleDueNotifications({ enabled: settings.dueNotif !== false, checks, bills, loans, reminders, checkDays: Number(settings.checkReminderDays) || 0 }).catch(() => {});
+      if (p.display === "granted") {
+        rescheduleDueNotifications({ enabled: settings.dueNotif !== false, checks, bills, loans, reminders, checkDays: Number(settings.checkReminderDays) || 0 }).catch(() => {});
+        // اندروید ۱۲ به بالا: بدون «آلارم و یادآور دقیق» اعلان‌ها دیر می‌رسند
+        if ((await exactAlarmStatus()) !== "granted" && window.confirm("برای رسیدن اعلان‌ها سر ساعت، مجوز «آلارم و یادآور دقیق» لازم است. صفحه‌ی تنظیمات همین مجوز باز شود؟")) await askExactAlarm();
+      }
     } catch {}
   }
   function openAlarm(it) {
@@ -239,13 +264,20 @@ export default function App() {
   }, []);
 
   // اعلان‌های واقعی سررسید چک/قبض/قسط و یادآوری‌ها (فقط در APK)
+  const [resumeTick, setResumeTick] = useState(0);   // با هر برگشت به برنامه یک واحد زیاد می‌شود تا اعلان‌ها دوباره زمان‌بندی شوند
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) return;
+    let l; let cancelled = false;
+    CapacitorApp.addListener("appStateChange", ({ isActive }) => { if (isActive) setResumeTick((n) => n + 1); }).then((h) => { if (cancelled) h.remove?.(); else l = h; }).catch(() => {});
+    return () => { cancelled = true; l?.remove?.(); };
+  }, []);
   useEffect(() => {
     if (!loaded || dailySplash || !Capacitor.isNativePlatform()) return;
     const tm = setTimeout(() => {
       rescheduleDueNotifications({ enabled: settings.dueNotif !== false, checks, bills, loans, reminders, checkDays: Number(settings.checkReminderDays) || 0 }).catch(() => {});
     }, 800);
     return () => clearTimeout(tm);
-  }, [loaded, dailySplash, checks, bills, loans, reminders, settings.dueNotif, settings.checkReminderDays]);
+  }, [loaded, dailySplash, checks, bills, loans, reminders, settings.dueNotif, settings.checkReminderDays, resumeTick]);
 
   const toggle = (key) => setOpen((o) => ({ ...o, [key]: !o[key] }));
   const catById = useCallback((id) => categories.find((c) => c.id === id), [categories]);
@@ -266,7 +298,7 @@ export default function App() {
   const totalBalance = useMemo(() => accounts.reduce((s, a) => s + accountBalance(a.id), 0), [accounts, accountBalance]);
   const totalAssets = useMemo(() => assets.reduce((s, a) => s + (a.quantity * a.currentPrice || 0), 0), [assets]);
 
-  const yearTx = useMemo(() => transactions.filter((t) => jalaliYear(new Date(t.date)) === year), [transactions, year]);
+  const yearTx = useMemo(() => transactions.filter((t) => jalaliYear(parseISO(t.date)) === year), [transactions, year]);
   const totalIncomeYear = useMemo(() => yearTx.filter((t) => t.type === "income" && isPnlTransaction(t)).reduce((s, t) => s + pnlAmount(t), 0), [yearTx]);
   const totalExpenseYear = useMemo(() => yearTx.filter((t) => t.type === "expense" && isPnlTransaction(t)).reduce((s, t) => s + pnlAmount(t), 0), [yearTx]);
   const gaugeMax = Math.max(totalIncomeYear, totalExpenseYear, 1);
@@ -293,8 +325,8 @@ export default function App() {
 
   // net worth trend: last 8 months
   const netWorthTrend = useMemo(() => {
-    const cutoffs = [], labels = [];
-    for (let i = 7; i >= 0; i--) { const d = new Date(); d.setMonth(d.getMonth() - i); cutoffs.push(d.toISOString().slice(0, 10)); labels.push(faMonthYear(d).split(" ")[0]); }
+    const ends = lastJalaliMonthEnds(8);   // ۸ ماه شمسی اخیر؛ برچسب‌ها هم نام ماه شمسی‌اند
+    const cutoffs = ends.map((e) => e.cutoff), labels = ends.map((e) => e.label);
     const base = accounts.reduce((s, a) => s + (a.initial || 0), 0);
     const bins = new Array(cutoffs.length).fill(0);       // یک بار عبور از تراکنش‌ها (قبلاً ۸ بار)
     for (const t of transactions) {
@@ -313,7 +345,19 @@ export default function App() {
   function updateTransaction(id, patch) {
     startTransition(() => setTransactions((p) => p.map((t) => t.id === id ? { ...t, ...patch, updatedAt: new Date().toISOString() } : t)));
   }
-  function deleteTransaction(id) { startTransition(() => setTransactions((p) => p.filter((t) => t.id !== id))); }
+  function deleteTransaction(id) {
+    const tx = transactions.find((t) => t.id === id);
+    if (tx?.loanId && tx.loanRole === "receipt") { alert("تراکنش دریافت وام از صفحه‌ی «وام‌ها» ویرایش یا حذف می‌شود."); return; }
+    if (tx?.loanId && tx.loanRole === "installment") {
+      const loan = loans.find((l) => l.id === tx.loanId);
+      if (loan) {
+        // فقط آخرین قسط ثبت‌شده قابل حذف است؛ در غیر این صورت شماره‌ی اقساط و تعداد پرداخت‌شده‌ها ناهماهنگ می‌شود
+        if (Number(tx.loanSeq) !== Number(loan.paidCount)) { alert(`قسط شماره ${toFaInt(tx.loanSeq)} آخرین قسط پرداخت‌شده نیست. ابتدا از صفحه‌ی «وام‌ها» اقساط بعدی را برگردان.`); return; }
+        setLoans((p) => p.map((l) => l.id === loan.id ? { ...l, paidCount: Math.max(Number(l.prepaidCount || 0), Number(l.paidCount || 0) - 1) } : l));
+      }
+    }
+    startTransition(() => setTransactions((p) => p.filter((t) => t.id !== id)));
+  }
   function addAccount(a) { const item = { ...a, id: a.id || uid() }; setAccounts((p) => [...p, item]); return item.id; }
   function deleteAccount(id) {
     const used = transactions.some((t) => t.accountId === id || t.toAccountId === id) || loans.some((l) => l.accountId === id) || checks.some((c) => c.accountId === id) || bills.some((b) => b.accountId === id) || debts.some((d) => d.accountId === id) || assets.some((a) => a.accountId === id);
@@ -344,24 +388,43 @@ export default function App() {
 
   const backupState = { backupVersion: 4, dataVersion: 4, ledgerVersion: 1, exportedAt: new Date().toISOString(), accounts, categories, transactions, journalEntries, budgets, loans, checks, bills, assets, recurring, favorites, settings: withoutPin(settings), shortcuts, members, events, projects, fiscalPeriods, notes, reminders, persons, debts, currencies, goals };
   async function exportBackup() {
-    const filename = `rexa-backup-${todayISO()}.json`;
-    const json = JSON.stringify(backupState, null, 2);
-    if (Capacitor.isNativePlatform()) {
-      try {
-        const result = await Filesystem.writeFile({ path: filename, data: json, directory: Directory.Cache, encoding: Encoding.UTF8 });
-        await Share.share({ title: "پشتیبان Rexa", text: "فایل پشتیبان Rexa", files: [result.uri], dialogTitle: "ذخیره یا ارسال پشتیبان Rexa" });
-        return;
-      } catch {}
+    // فایل پشتیبان حاوی همه‌ی اطلاعات مالی است؛ به‌صورت پیش‌فرض با رمز (AES-GCM) رمزگذاری می‌شود
+    let payload = JSON.stringify(backupState, null, 2);
+    let filename = `rexa-backup-${todayISO()}.json`;
+    if (window.confirm("پشتیبان با رمز رمزگذاری شود؟\n\nبله (پیشنهادی) = فایل فقط با رمزی که می‌دهی باز می‌شود\nخیر = فایل ساده و بدون رمز")) {
+      const pass = window.prompt("یک رمز برای فایل پشتیبان وارد کن (حداقل ۴ نویسه). این رمز را فراموش نکن؛ بدون آن بازیابی ممکن نیست.") || "";
+      if (pass.length < 4) { alert("رمز واردنشد یا کوتاه بود؛ پشتیبان ساخته نشد."); return false; }
+      try { payload = await encryptSnapshot(backupState, pass, { kind: "backup" }); filename = `rexa-backup-${todayISO()}.enc.json`; }
+      catch (e) { alert("رمزگذاری پشتیبان ممکن نشد: " + (e?.message || e)); return false; }
     }
-    const blob = new Blob([json], { type: "application/json" });
+    if (Capacitor.isNativePlatform()) {
+      let written = null;
+      try {
+        written = await Filesystem.writeFile({ path: filename, data: payload, directory: Directory.Cache, encoding: Encoding.UTF8 });
+        await Share.share({ title: "پشتیبان Rexa", text: "فایل پشتیبان Rexa", files: [written.uri], dialogTitle: "ذخیره یا ارسال پشتیبان Rexa" });
+        return true;
+      } catch (e) {
+        if (!written) console.error("backup write fail", e);   // کاربر اشتراک‌گذاری را بسته: خطا نیست
+        else return false;
+      } finally {
+        // نسخه‌ی موقت در Cache نباید روی دستگاه بماند
+        if (written) Filesystem.deleteFile({ path: filename, directory: Directory.Cache }).catch(() => {});
+      }
+    }
+    const blob = new Blob([payload], { type: "application/json" });
     const url = URL.createObjectURL(blob); const a = document.createElement("a");
     a.href = url; a.download = filename; document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
+    return true;
   }
   function applyBackupData(data, { keepSecurity = false } = {}) {
-        const migratedTransactions = migrateTransactions(data?.transactions || [], data?.loans || []);
+    const check = validateBackup(data);
+    if (!check.ok) throw new Error(check.errors[0]);   // فایل نامعتبر هرگز نیمه‌کاره اعمال نمی‌شود
+    // همه‌ی تبدیل‌ها قبل از اولین setState انجام می‌شوند؛ اگر خطا بدهد هیچ داده‌ای تغییر نکرده است
+    const migratedTransactions = data.transactions ? migrateTransactions(data.transactions, data.loans || []) : null;
+    startTransition(() => {
         if (data.accounts) setAccounts(data.accounts);
         if (data.categories) setCategories(data.categories);
-        if (data.transactions) setTransactions(migratedTransactions);
+        if (migratedTransactions) setTransactions(migratedTransactions);
         if (data.budgets) setBudgets(data.budgets);
         if (data.loans) setLoans(data.loans);
         if (data.checks) setChecks(data.checks);
@@ -381,14 +444,31 @@ export default function App() {
         if (data.goals) setGoals(data.goals);
         if (data.shortcuts) setShortcuts(data.shortcuts);
         if (data.settings) setSettings((s) => ({ ...s, ...withoutPin(data.settings), ...(keepSecurity ? { biometricEnabled: s.biometricEnabled } : {}) }));
+    });
   }
   function importBackup(file) {
     const reader = new FileReader();
-    reader.onload = (e) => {
+    reader.onerror = () => alert("خواندن فایل پشتیبان ممکن نشد.");
+    reader.onload = async (e) => {
+      let data;
       try {
-        applyBackupData(JSON.parse(e.target.result));
+        let parsed;
+        try { parsed = JSON.parse(e.target.result); } catch { alert("فایل پشتیبان نامعتبر است (JSON خراب)."); return; }
+        if (isEncryptedBackup(parsed)) {
+          const pass = window.prompt("این پشتیبان رمزگذاری شده است. رمز فایل را وارد کن:") || "";
+          if (!pass) return;
+          try { data = (await decryptSnapshot(e.target.result, pass)).data; }
+          catch { alert("رمز اشتباه است یا فایل آسیب دیده است."); return; }
+        } else data = parsed;
+        const check = validateBackup(data);
+        if (!check.ok) { alert("بازیابی انجام نشد:\n" + check.errors.join("\n")); return; }
+        const c = check.counts;
+        const summary = `${toFaInt(c.accounts || 0)} حساب، ${toFaInt(c.transactions || 0)} تراکنش، ${toFaInt(c.loans || 0)} وام، ${toFaInt(c.checks || 0)} چک`;
+        if (!window.confirm(`⚠️ هشدار: با بازیابی، همه‌ی داده‌های فعلی برنامه با محتوای این فایل جایگزین می‌شوند.\n\nمحتوای فایل: ${summary}\n\nادامه می‌دهی؟`)) return;
+        if (window.confirm("قبل از جایگزینی، از داده‌های فعلی پشتیبان گرفته شود؟ (پیشنهاد می‌شود)")) { const ok = await exportBackup(); if (ok === false && !window.confirm("پشتیبان فعلی ساخته نشد. بدون آن ادامه بدهم؟")) return; }
+        applyBackupData(data);
         alert("بازیابی اطلاعات با موفقیت انجام شد");
-      } catch { alert("فایل پشتیبان نامعتبر است"); }
+      } catch (err) { alert("بازیابی ناموفق بود: " + (err?.message || err)); }
     };
     reader.readAsText(file);
   }
@@ -414,40 +494,86 @@ export default function App() {
     try { if (Capacitor.isNativePlatform()) await CapacitorApp.exitApp(); else window.history.back(); } catch {}
   }, [settings, accounts, categories, transactions, journalEntries, budgets, loans, checks, bills, assets, recurring, favorites, members, events, projects, fiscalPeriods, notes, reminders, shortcuts]);
 
+  // قفل دوباره: اگر برنامه بیش از ۳۰ ثانیه در پس‌زمینه بماند، با برگشت دوباره قفل می‌شود
+  // (ساعت عقب‌رفته یا زمان نامعتبر هم یعنی قفل)
+  const lockCfgRef = useRef(false);
+  lockCfgRef.current = !!(settings.pinHash || settings.pin || settings.biometricEnabled);
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) return;
+    let listener; let cancelled = false; let leftAt = 0;
+    CapacitorApp.addListener("appStateChange", ({ isActive }) => {
+      if (!isActive) { leftAt = Date.now(); return; }
+      if (!leftAt || !lockCfgRef.current) return;
+      const away = Date.now() - leftAt; leftAt = 0;
+      if (!(away >= 0 && away < RELOCK_AFTER_MS)) setUnlocked(false);
+    }).then((l) => { if (cancelled) l.remove?.(); else listener = l; }).catch(() => {});
+    return () => { cancelled = true; listener?.remove?.(); };
+  }, []);
+
+  // دکمه‌ی برگشت اندروید: فقط یک شنونده‌ی ثابت ثبت می‌شود و آخرین state را از ref می‌خواند
+  // (قبلاً با هر تغییر state دوباره و به‌صورت async ثبت می‌شد و شنونده‌های هم‌زمان می‌ماند)
+  const backStateRef = useRef({});
+  backStateRef.current = { showAdd, showQuickAdd, showCapture, menuOpen, subView, tab, showAlarms, showNoteModal, showReminderModal, performExit };
+  const exitingRef = useRef(false);
   useEffect(() => {
     if (!loaded || !Capacitor.isNativePlatform()) return;
-    let listener;
-    (async () => {
-      listener = await CapacitorApp.addListener("backButton", async () => {
-        const topOverlay = (window.__rexaBack || [])[(window.__rexaBack || []).length - 1];
-        if (topOverlay) { topOverlay(); return; }
-        if (showAdd) { setShowAdd(false); setPrefillTx(null); return; }
-        if (showQuickAdd) { setShowQuickAdd(false); return; }
-        if (showCapture) { setShowCapture(false); return; }
-        if (menuOpen) { setMenuOpen(false); return; }
-        if (subView) { setSubView(null); return; }
-        if (tab !== "home") { setTab("home"); return; }
-        await performExit();
-      });
-    })();
-    return () => { listener?.remove?.(); };
-  }, [loaded, showAdd, showQuickAdd, showCapture, menuOpen, subView, tab, performExit]);
+    let cancelled = false, handle = null;
+    CapacitorApp.addListener("backButton", async () => {
+      const st = backStateRef.current;
+      const stack = window.__rexaBack || [];
+      const topOverlay = stack[stack.length - 1];
+      if (topOverlay) { topOverlay(); return; }
+      if (st.showAlarms) { setShowAlarms(false); return; }
+      if (st.showNoteModal) { setShowNoteModal(false); return; }
+      if (st.showReminderModal) { setShowReminderModal(false); return; }
+      if (st.showAdd) { setShowAdd(false); setPrefillTx(null); return; }
+      if (st.showQuickAdd) { setShowQuickAdd(false); return; }
+      if (st.showCapture) { setShowCapture(false); return; }
+      if (st.menuOpen) { setMenuOpen(false); return; }
+      if (st.subView) { setSubView(null); return; }
+      if (st.tab !== "home") { setTab("home"); return; }
+      if (exitingRef.current) return;   // پرسش خروج دوبار نمایش داده نشود
+      exitingRef.current = true;
+      try { await st.performExit(); } finally { exitingRef.current = false; }
+    }).then((h) => { if (cancelled) h.remove?.(); else handle = h; }).catch(() => {});
+    return () => { cancelled = true; handle?.remove?.(); };
+  }, [loaded]);
 
   const registerVoiceTransaction = useCallback((transcript) => {
-    const parsed = parseBankSms(transcript);
-    if (!parsed.amount) { alert("مبلغ تشخیص داده نشد. مثال: «امروز ۳۵۰ تومن برای شام دادم»."); return; }
+    const parsed = parseBankSms(transcript, { voice: true });
+    if (!parsed.amount) { alert("مبلغ تشخیص داده نشد. مثال: «امروز ۳۵۰ هزار تومان برای شام دادم»."); return; }
+    const activeAccounts = accounts.filter((a) => a.active !== false);
+    if (!activeAccounts.length) { alert("برای ثبت صوتی ابتدا یک حساب بسازید."); return; }
+    // بیش از یک حساب: حساب را خود کاربر انتخاب می‌کند (فرم ثبت با مبلغ و نوع پر‌شده باز می‌شود)؛ بی‌سؤال به حساب اول نمی‌رود
+    if (activeAccounts.length > 1 || parsed.scaleGuessed) {
+      setPrefillTx({ type: parsed.type, amount: parsed.amount, note: `ثبت صوتی: ${parsed.note}`, categoryHint: parsed.categoryHint, tags: ["ثبت صوتی"] });
+      setShowAdd(true);
+      return;
+    }
     const sameKind = categories.filter((c) => c.kind === parsed.type);
     const hinted = parsed.categoryHint ? sameKind.find((c) => c.name === parsed.categoryHint) : null;
     const fallback = sameKind.find((c) => c.name === (parsed.type === "expense" ? "متفرقه" : "درآمد متفرقه")) || sameKind[0];
-    const accountId = accounts[0]?.id;
-    if (!accountId) { alert("برای ثبت صوتی ابتدا یک حساب بسازید."); return; }
-    addTransaction({ type: parsed.type, amount: parsed.amount, categoryId: hinted?.id || fallback?.id || "", accountId, date: todayISO(), note: `ثبت صوتی: ${parsed.note}`, tags: ["ثبت صوتی"] });
+    addTransaction({ type: parsed.type, amount: parsed.amount, categoryId: hinted?.id || fallback?.id || "", accountId: activeAccounts[0].id, date: todayISO(), note: `ثبت صوتی: ${parsed.note}`, tags: ["ثبت صوتی"] });
     alert(`${toFaInt(parsed.amount)} ریال بابت «${hinted?.name || fallback?.name || "بدون دسته"}» ثبت شد.`);
   }, [categories, accounts]);
   const t = THEME[settings.theme] || THEME.light;
-  Object.assign(BRAND, COLOR_PRESETS[settings.themeColor] || COLOR_PRESETS.purple);
+  // BRAND یک شیء مشترک است؛ فقط وقتی رنگ تم عوض می‌شود (نه در هر رندر) مقداردهی می‌شود و قبل از رندر فرزندان انجام می‌شود.
+  // کلید روی ظرف اصلی (themeColorKey) باعث می‌شود همه‌ی اجزا — حتی آن‌هایی که دوباره رندر نمی‌شدند — با رنگ تازه ساخته شوند.
+  const themeColorKey = COLOR_PRESETS[settings.themeColor] ? settings.themeColor : "purple";
+  useMemo(() => { Object.assign(BRAND, COLOR_PRESETS[themeColorKey]); return themeColorKey; }, [themeColorKey]);
 
   if (dailySplash) return <DailySentenceSplash onDone={() => setDailySplash(false)} />;
+  if (loadError) {
+    return (
+      <div dir="rtl" style={{ minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 14, background: BRAND.header, fontFamily: FONT, padding: 24, textAlign: "center" }}>
+        <RexaLogo size={72} showWordmark />
+        <div style={{ color: "#fff", fontSize: 15, fontWeight: 800 }}>خواندن اطلاعات از حافظه‌ی برنامه ممکن نشد</div>
+        <div style={{ color: "#d8c9e8", fontSize: 12.5, lineHeight: 1.9, maxWidth: 320 }}>برای محافظت از اطلاعاتت، برنامه چیزی روی داده‌های قبلی نمی‌نویسد. دوباره تلاش کن؛ اگر مشکل ادامه داشت برنامه را کامل ببند و دوباره باز کن (برنامه را حذف نکن).</div>
+        <div style={{ color: "#b9a6cf", fontSize: 11, direction: "ltr", maxWidth: 320, wordBreak: "break-word" }}>{loadError}</div>
+        <button onClick={initialLoad} style={{ background: BRAND.gold, color: "#241a30", border: "none", borderRadius: 12, padding: "12px 28px", fontWeight: 800, fontSize: 14, cursor: "pointer", fontFamily: "inherit" }}>تلاش دوباره</button>
+      </div>
+    );
+  }
   if (!loaded) {
     return (
       <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 16, background: BRAND.header, fontFamily: FONT }}>
@@ -467,7 +593,7 @@ export default function App() {
 
   async function rebuildData() {
     if (!window.confirm("بازسازی اطلاعات انجام شود؟ قبل از بازسازی یک پشتیبان خودکار تهیه می‌شود.")) return;
-    await exportBackup();
+    if ((await exportBackup()) === false && !window.confirm("پشتیبان ساخته نشد. بدون پشتیبان ادامه بدهم؟")) return;
     const normalize = (arr, defaults = []) => (Array.isArray(arr) ? arr : defaults).map((x) => ({ ...x, id: x?.id || uid() }));
     setAccounts(normalize(accounts, seedAccounts()));
     setCategories(normalize(categories, seedCategories()));
@@ -483,7 +609,7 @@ export default function App() {
 
   async function clearAllData() {
     if (!window.confirm("تمام اطلاعات مالی و تراکنش‌ها پاک می‌شود. ابتدا پشتیبان تهیه شود؟")) return;
-    await exportBackup();
+    if ((await exportBackup()) === false && !window.confirm("پشتیبان ساخته نشد. بدون پشتیبان ادامه بدهم؟")) return;
     if (!window.confirm("تأیید نهایی: اطلاعات مالی این دستگاه خام شود؟ این عملیات پس از اجرا با پشتیبان قابل بازگردانی است.")) return;
     setAccounts(seedAccounts()); setCategories(seedCategories()); setTransactions([]); setBudgets([]); setLoans([]); setChecks([]);
     setBills([]); setAssets([]); setRecurring([]); setFavorites({ categories: [], accounts: [] }); setMembers([]); setEvents([]);
@@ -510,7 +636,7 @@ export default function App() {
 
   return (
     <ThemeCtx.Provider value={t}>
-      <div dir="rtl" onClick={handleTripleTap} style={{ fontFamily: FONT, background: t.bg, color: t.text, minHeight: "100vh", maxWidth: 480, margin: "0 auto", display: "flex", flexDirection: "column", position: "relative", paddingBottom: "calc(100px + env(safe-area-inset-bottom, 0px))", boxShadow: "0 0 30px rgba(0,0,0,0.08)", zoom: settings.fontScale || 1 }}>
+      <div key={themeColorKey} dir="rtl" onClick={handleTripleTap} style={{ fontFamily: FONT, background: t.bg, color: t.text, minHeight: "100vh", maxWidth: 480, margin: "0 auto", display: "flex", flexDirection: "column", position: "relative", paddingBottom: "calc(100px + env(safe-area-inset-bottom, 0px))", boxShadow: "0 0 30px rgba(0,0,0,0.08)", zoom: settings.fontScale || 1 }}>
         <style>{`
           @import url('https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;500;600;700;800&display=swap');
           * { box-sizing: border-box; } html, body, #root { margin: 0; min-height: 100%; width: 100%; } body { overflow-x: hidden; overscroll-behavior-y: none; }
@@ -583,7 +709,7 @@ export default function App() {
               />
             )}
             {tab === "operations" && <OperationsView setSubView={setSubView} onAdd={() => setShowAdd(true)} />}
-            {tab === "checks" && <ChecksManager checks={checks} setChecks={setChecks} accounts={accounts} categories={categories} setTransactions={setTransactions} focusId={focusId} setFocusId={setFocusId} />}
+            {tab === "checks" && <ChecksManager checks={checks} setChecks={setChecks} accounts={accounts} categories={categories} addCategory={addCategory} setTransactions={setTransactions} focusId={focusId} setFocusId={setFocusId} />}
             {tab === "reports" && (
               <ReportsView
                 expenseByCategory={expenseByCategory} incomeByCategory={incomeByCategory}

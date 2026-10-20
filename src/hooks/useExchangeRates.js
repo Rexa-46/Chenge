@@ -4,6 +4,18 @@ import { Capacitor, CapacitorHttp } from "@capacitor/core";
 /* ---------------------------------------------------------
    نرخ دلار بازار آزاد: یک‌بار بعد از بارگذاری گرفته می‌شود و با نرخ دستی هماهنگ می‌ماند
 --------------------------------------------------------- */
+const LAST_RATE_KEY = "rexa:lastUsdRate";
+const saveLastRate = (usd, fetchedAt) => { try { localStorage.setItem(LAST_RATE_KEY, JSON.stringify({ usd, fetchedAt })); } catch {} };
+const readLastRate = () => { try { const v = JSON.parse(localStorage.getItem(LAST_RATE_KEY) || "null"); return v?.usd > 0 ? v : null; } catch { return null; } };
+// منبع پشتیبان: نرخ جهانی دلار به ریال (تقریبی و رسمی؛ جایگزین موقت وقتی TGJU تغییر کرده یا در دسترس نیست)
+async function fetchBackupRate() {
+  const url = "https://open.er-api.com/v6/latest/USD";
+  let data;
+  if (Capacitor.isNativePlatform()) { const r = await CapacitorHttp.get({ url, headers: { Accept: "application/json" }, connectTimeout: 6000, readTimeout: 6000 }); data = typeof r.data === "string" ? JSON.parse(r.data) : r.data; }
+  else { const r = await fetch(url); data = await r.json(); }
+  return Number(data?.rates?.IRR) || 0;
+}
+
 export function useExchangeRates({ loaded, settings, setSettings }) {
   const [rates, setRates] = useState(null); // { usd: rialsPerUsd, fetchedAt }
 
@@ -34,8 +46,16 @@ export function useExchangeRates({ loaded, settings, setSettings }) {
       if (!Number.isFinite(irr) || irr <= 0) throw new Error("TGJU dollar rate not found");
       const fetchedAt = new Date().toISOString();
       setRates({ usd: irr, fetchedAt, source: "tgju", sourceLabel: "TGJU · دلار آزاد" });
+      saveLastRate(irr, fetchedAt);
       setSettings((prev) => ({ ...prev, lastRatesUpdate: fetchedAt }));
     } catch {
+      // منبع دوم + آخرین نرخ موفق ذخیره‌شده، پیش از رفتن به نرخ دستی
+      try {
+        const r = await fetchBackupRate();
+        if (r > 0) { const fetchedAt = new Date().toISOString(); setRates({ usd: r, fetchedAt, source: "backup", sourceLabel: "منبع پشتیبان · دلار" }); saveLastRate(r, fetchedAt); return; }
+      } catch {}
+      const last = readLastRate();
+      if (last) { setRates({ usd: last.usd, fetchedAt: last.fetchedAt, source: "cached", sourceLabel: "آخرین نرخ ذخیره‌شده" }); return; }
       const manual = Number(String(settings.manualUsdRate || "").replace(/,/g, ""));
       setRates((prev) => prev?.usd ? { ...prev, source: prev.source || "cached", fetchedAt: prev.fetchedAt || new Date().toISOString() } : { usd: manual > 0 ? manual : null, fetchedAt: new Date().toISOString(), source: manual > 0 ? "manual" : "failed", sourceLabel: manual > 0 ? "دستی" : "" });
     }
