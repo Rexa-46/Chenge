@@ -4,9 +4,9 @@ import { uid } from "../utils/id.js";
    Seed data
 --------------------------------------------------------- */
 export const seedAccounts = () => ([
-  { id: uid(), name: "بانک ملت", type: "bank", initial: 5000000 },
-  { id: uid(), name: "صندوق نقدی", type: "fund", initial: 800000 },
-  { id: uid(), name: "کارت عابر ملت", type: "card", initial: 0 },
+  { id: uid(), name: "حساب بانکی", type: "bank", initial: 0 },
+  { id: uid(), name: "صندوق نقدی", type: "fund", initial: 0 },
+  { id: uid(), name: "کارت بانکی", type: "card", initial: 0 },
 ]);
 export const seedCategories = () => {
   const vehicle = { id: uid(), name: "خودرو", kind: "expense" };
@@ -37,7 +37,7 @@ export const normalizeHomeSections = (list) => {
 };
 export const seedSettings = () => ({
   theme: "light", pin: "", pinHash: "", pinSalt: "", dueNotif: true, sharedFamily: false, themeColor: "purple",
-  profile: { name: "alireza shadfar", phone: "", email: "" },
+  profile: { name: "", phone: "", email: "" },
   homeLayout: "cards", homeSections: DEFAULT_HOME_SECTIONS,
   fontScale: 1, calendarMode: "jalali", currency: "rial",
   checkReminderDays: 7, smsNotif: false, smsAutoRead: false, biometricEnabled: false,
