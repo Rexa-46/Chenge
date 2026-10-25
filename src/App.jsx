@@ -648,7 +648,7 @@ export default function App() {
         {subView ? (
           <Header title={SUBVIEW_TITLES[subView]} back onBack={() => setSubView(null)} onBell={openBell} alarmCount={alarms.length} />
         ) : (
-          <Header title={settings.profile?.name || "alireza shadfar"} onMenu={() => setMenuOpen(true)}
+          <Header title={settings.profile?.name || "Rexa"} onMenu={() => setMenuOpen(true)}
             onMic={registerVoiceTransaction} onBell={openBell} alarmCount={alarms.length} />
         )}
 
