@@ -94,7 +94,7 @@ jobs:
 
       - name: Set Android versionCode to the build number (needed so a new APK counts as an update)
         run: |
-          sed -i "s/versionCode 1/versionCode ${{ github.run_number }}/; s/versionName \"1.0\"/versionName \"1.0.${{ github.run_number }}\"/" android/app/build.gradle
+          sed -i "s/versionCode 1/versionCode ${{ github.run_number }}/; s/versionName \"1.0\"/versionName \"4.6.9\"/" android/app/build.gradle
           grep -n "versionCode\|versionName" android/app/build.gradle
 
       - name: Use the fixed signing key (so each new APK installs over the previous one)
