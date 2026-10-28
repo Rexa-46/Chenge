@@ -1,13 +1,13 @@
-import { useState } from "react";
 import { Eye, EyeOff, Plus } from "lucide-react";
 
 import { BankCard } from "./BankCard.jsx";
+import { usePersistedState } from "../../hooks/usePersistedState.js";
 import { useT } from "../../theme/ThemeContext.js";
 import { BRAND } from "../../theme/palette.js";
 
 export function BankCardCarousel({ accounts, accountBalance, currency, usdRate, onAddCard, onEditAccount }) {
   const t = useT();
-  const [hidden, setHidden] = useState(false);
+  const [hidden, setHidden] = usePersistedState("hideBalance", false);   // تا وقتی کاربر عوضش نکرده همان می‌ماند
   const cards = accounts.filter((a) => a.type === "bank" || a.type === "card");
   return (
     <div style={{ marginBottom: 16 }}>

@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { Bar, BarChart, CartesianGrid, Cell, ResponsiveContainer, XAxis, YAxis } from "recharts";
 
 import { categoryIconFor } from "../../utils/categoryIcons.js";
@@ -15,6 +15,7 @@ const PANEL = { background: "linear-gradient(180deg,#101a24,#0a1118)", border: "
 const dayName = (iso) => { try { return new Intl.DateTimeFormat("fa-IR", { weekday: "long" }).format(new Date(iso + "T12:00:00")); } catch { return iso; } };
 
 export function ExpenseDistribution({ data = [], transactions = [], currency, usdRate }) {
+  const [openRow, setOpenRow] = useState({});
   const total = data.reduce((s, d) => s + d.amount, 0);
   const { bars, unit } = useMemo(() => {
     const today = todayISO();
@@ -33,13 +34,21 @@ export function ExpenseDistribution({ data = [], transactions = [], currency, us
     <div dir="rtl" style={{ ...PANEL, padding: 10, fontFamily: FONT, color: "#e8f1f7" }}>
       {data.map((d, i) => {
         const color = NEON[i % NEON.length]; const Icon = categoryIconFor(d.name);
+        const kids = d.children || [];
         return (
-          <div key={d.name + i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 10px", marginBottom: 6, borderRadius: 12, background: "rgba(255,255,255,.035)", border: "1px solid rgba(255,255,255,.06)" }}>
+          <div key={d.name + i}>
+          <div onClick={kids.length ? () => setOpenRow((o) => ({ ...o, [d.name + i]: !o[d.name + i] })) : undefined} style={{ cursor: kids.length ? "pointer" : "default", display: "flex", alignItems: "center", gap: 10, padding: "9px 10px", marginBottom: 6, borderRadius: 12, background: "rgba(255,255,255,.035)", border: "1px solid rgba(255,255,255,.06)" }}>
             <span style={{ width: 34, height: 34, borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "center", color, filter: `drop-shadow(0 0 5px ${color}88)`, flexShrink: 0 }}><Icon size={24} strokeWidth={1.8} /></span>
             <span style={{ fontWeight: 800, fontSize: 14, flex: "0 0 auto", minWidth: 64 }}>{d.name}</span>
             <span style={{ flex: 1, textAlign: "left", fontSize: 12.5, color: "#c9d6df", fontWeight: 700 }}>{formatMoney(d.amount, currency, usdRate)}</span>
             <span style={{ fontSize: 12.5, color: "#9fb3c0", minWidth: 36, textAlign: "left" }}>{faDigits(Math.round((d.amount / total) * 100))}٪</span>
             <span style={{ width: 11, height: 11, borderRadius: "50%", background: color, boxShadow: `0 0 8px ${color}`, flexShrink: 0 }} />
+          </div>
+          {openRow[d.name + i] && kids.map((k) => (
+            <div key={k.id} style={{ display: "flex", justifyContent: "space-between", padding: "5px 18px 5px 10px", fontSize: 12, color: "#c9d6df" }}>
+              <span>↳ {k.name}{k.children?.length ? ` (${faDigits(k.children.length)})` : ""}</span><span>{formatMoney(k.amount, currency, usdRate)} · {faDigits(total ? Math.round((k.amount / total) * 100) : 0)}٪</span>
+            </div>
+          ))}
           </div>
         );
       })}

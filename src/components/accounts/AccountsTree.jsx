@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Check, ChevronLeft, Pencil, Plus, Search, Star, Trash2, X } from "lucide-react";
+import { Check, ChevronLeft, FolderInput, Pencil, Plus, Search, Star, Trash2, X } from "lucide-react";
 
 import { EmptyRow } from "../common/EmptyRow.jsx";
 import { ACCOUNT_GROUPS, accountPath, DEBT_GROUPS, faKey } from "../../domain/accountTree.js";
@@ -8,8 +8,9 @@ import { BRAND } from "../../theme/palette.js";
 import { useStyles } from "../../theme/styles.js";
 import { toFaInt } from "../../utils/format.js";
 import { uid } from "../../utils/id.js";
+import { MoveCategorySheet } from "./MoveCategorySheet.jsx";
 
-export function AccountsTree({ categories = [], transactions = [], addCategory, deleteCategory, updateCategory, favorites, toggleFavorite, mode = "manage", value, onPick, selectable, onBlocked, defaultExpanded }) {
+export function AccountsTree({ categories = [], transactions = [], addCategory, deleteCategory, updateCategory, moveCategory, favorites, toggleFavorite, mode = "manage", value, onPick, selectable, onBlocked, defaultExpanded }) {
   const st = useStyles();
   const t = useT();
   const picking = mode === "pick";
@@ -24,6 +25,7 @@ export function AccountsTree({ categories = [], transactions = [], addCategory, 
   const [newName, setNewName] = useState("");
   const [newTwoWay, setNewTwoWay] = useState(false);
   const [editTwoWay, setEditTwoWay] = useState(false);
+  const [moveTarget, setMoveTarget] = useState(null);
   const favIds = favorites?.categories || [];
   const q = faKey(query);
 
@@ -75,7 +77,7 @@ export function AccountsTree({ categories = [], transactions = [], addCategory, 
             <button onClick={() => { if (editVal.trim()) updateCategory?.(c.id, { name: editVal.trim(), ...(depth === 0 ? { twoWay: editTwoWay } : {}) }); setEditId(null); }} style={{ background: BRAND.green, border: "none", borderRadius: 7, color: "#fff", padding: "6px 10px", cursor: "pointer" }}><Check size={14} /></button>
             <button onClick={() => setEditId(null)} style={smallBtn(t.sub)}><X size={14} /></button>
           </>) : (<>
-            <div onClick={picking ? (locked ? () => { if (kids.length) toggle(c.id); else onBlocked?.(c); } : () => onPick?.(c.id)) : kids.length ? () => toggle(c.id) : undefined} style={{ flex: 1, minWidth: 0, cursor: picking || kids.length ? "pointer" : "default" }}>
+            <div onClick={picking ? (locked ? () => { if (kids.length) toggle(c.id); else onBlocked?.(c); } : kids.length ? () => toggle(c.id) : () => onPick?.(c.id)) : kids.length ? () => toggle(c.id) : undefined} style={{ flex: 1, minWidth: 0, cursor: picking || kids.length ? "pointer" : "default" }}>
               <div style={{ fontSize: depth ? 13 : 14, fontWeight: selected ? 800 : depth ? 500 : 600, color: t.text }}>{depth > 0 && "↳ "}{c.name}{c.twoWay && <span style={{ marginRight: 6, fontSize: 10.5, fontWeight: 700, color: BRAND.violet, background: "rgba(88,39,119,.10)", borderRadius: 10, padding: "1px 7px" }}>↔ دو طرفه</span>}</div>
               {c.twoWay && !picking && !flat && (() => { const tt = twoWayTotals(c); return (tt.debit || tt.credit) ? <div style={{ fontSize: 11, color: t.sub, marginTop: 2 }}>بدهکار: {toFaInt(tt.debit)} · بستانکار: {toFaInt(tt.credit)} · مانده: {toFaInt(Math.abs(tt.debit - tt.credit))} {tt.debit >= tt.credit ? "بدهکار" : "بستانکار"}</div> : null; })()}
               {flat && path && <div style={{ fontSize: 11, color: t.sub, marginTop: 2 }}>{path}</div>}
@@ -83,6 +85,7 @@ export function AccountsTree({ categories = [], transactions = [], addCategory, 
             {selected && <Check size={16} color={BRAND.darkgreen} />}
             {!picking && toggleFavorite && <button onClick={() => toggleFavorite("categories", c.id)} style={smallBtn("#f5b301")}><Star size={15} fill={favIds.includes(c.id) ? "#f5b301" : "none"} color="#f5b301" /></button>}
             {!picking && <button onClick={() => { setEditId(c.id); setEditVal(c.name); setEditTwoWay(!!c.twoWay); }} style={smallBtn(BRAND.violet)}><Pencil size={15} /></button>}
+            {!picking && moveCategory && <button onClick={() => setMoveTarget(c)} title="انتقال به سرفصل دیگر" style={smallBtn(BRAND.teal || BRAND.violet)}><FolderInput size={15} /></button>}
             {!selectable && <button onClick={() => { setAddFor(addFor?.parentId === c.id ? null : { kind: c.kind, parentId: c.id }); setAddName(""); setExpanded((e) => ({ ...e, [c.id]: true })); }} style={smallBtn(BRAND.green)}><Plus size={15} /></button>}
             {!picking && <button onClick={() => { if (window.confirm(`«${c.name}»${childrenOf(c.id).length ? " و زیرمجموعه‌هایش" : ""} حذف شود؟`)) deleteCategory?.(c.id); }} style={smallBtn(BRAND.crimson)}><Trash2 size={15} /></button>}
             {kids.length > 0 ? <button onClick={() => toggle(c.id)} style={smallBtn(t.sub)}>{arrowIcon(isOpen)}</button> : <span style={{ width: 25, flexShrink: 0 }} />}
@@ -93,6 +96,11 @@ export function AccountsTree({ categories = [], transactions = [], addCategory, 
             <input type="checkbox" checked={editTwoWay} onChange={(e) => setEditTwoWay(e.target.checked)} style={{ width: 18, height: 18 }} />
             دو طرفه (هم بدهکار هم بستانکار — مثل بیمه)
           </label>
+        )}
+        {isOpen && picking && !locked && kids.length > 0 && (
+          <div onClick={() => onPick?.(c.id)} style={{ display: "flex", alignItems: "center", gap: 6, padding: "9px 4px", paddingRight: 4 + (depth + 1) * 18, borderBottom: `1px solid ${t.border}`, cursor: "pointer", color: BRAND.header, fontWeight: 800, fontSize: 12.5 }}>
+            <Check size={14} /> انتخاب خودِ «{c.name}»
+          </div>
         )}
         {isOpen && kids.map((k) => renderNode(k, depth + 1))}
         {addFor?.parentId === c.id && renderAddForm(c.kind, c.id, depth + 1)}
@@ -138,6 +146,7 @@ export function AccountsTree({ categories = [], transactions = [], addCategory, 
           {results.length === 0 ? <EmptyRow text="موردی پیدا نشد" /> : results.map((c) => renderNode(c, 0, true))}
         </div>
       ) : ACCOUNT_GROUPS.map(renderGroup)}
+      {moveTarget && <MoveCategorySheet category={moveTarget} categories={categories} transactions={transactions} onClose={() => setMoveTarget(null)} onMove={(parentId, kind) => { moveCategory(moveTarget.id, parentId, kind); setMoveTarget(null); }} />}
       {!selectable && (<div style={{ ...st.card, padding: 12, marginTop: 4, border: `1.5px dashed ${t.inputBorder}`, boxShadow: "none" }}>
         <div onClick={() => setShowNew((v) => !v)} style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", color: BRAND.header, fontWeight: 800, fontSize: 13.5 }}>
           <span style={{ width: 26, height: 26, borderRadius: "50%", background: BRAND.header, color: "#fff", display: "flex", alignItems: "center", justifyContent: "center" }}><Plus size={15} /></span>
