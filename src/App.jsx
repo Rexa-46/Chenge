@@ -33,6 +33,7 @@ import { buildAlarms } from "./domain/alarms.js";
 import { askExactAlarm, exactAlarmStatus, listenNotificationActions, onLoanPayRequest, requestLoanPay, rescheduleDueNotifications } from "./services/notifications.js";
 import { decryptSnapshot, encryptSnapshot, syncReady } from "./services/githubSync.js";
 import { ExitSheet } from "./components/sheets/ExitSheet.jsx";
+import { UpdateNotesToast } from "./components/common/UpdateNotesToast.jsx";
 import { isEncryptedBackup, validateBackup } from "./services/backupValidate.js";
 import { makePinRecord, withoutPin } from "./services/pinLock.js";
 import { loadKey, saveKey } from "./services/storage.js";
@@ -498,7 +499,15 @@ export default function App() {
     loaded, getSnapshot: () => backupRef.current, applySnapshot: (d) => applyBackupData(d, { keepSecurity: true }),
     deps: [loaded, accounts, categories, transactions, journalEntries, budgets, loans, checks, bills, assets, recurring, favorites, members, events, projects, fiscalPeriods, notes, reminders, persons, debts, currencies, goals, shortcuts, settings],
   });
-  const { updateInfo, setUpdateInfo, updateMsg, checkUpdateNow } = useAppUpdates({ loaded });   // بررسی نسخه‌ی جدید از GitHub Releases (فقط در APK)
+  const { updateInfo, setUpdateInfo, updateMsg, checkUpdateNow } = useAppUpdates({ loaded });
+  const [notesOpen, setNotesOpen] = useState(false);
+  useEffect(() => {   // توضیحات نسخه‌ی جدید فقط یک بار برای هر نسخه نشان داده می‌شود
+    if (!updateInfo?.notes?.length) return;
+    let seen = ""; try { seen = localStorage.getItem("rexa:notesShown") || ""; } catch {}
+    if (seen === String(updateInfo.build)) return;
+    try { localStorage.setItem("rexa:notesShown", String(updateInfo.build)); } catch {}
+    setNotesOpen(true);
+  }, [updateInfo?.build]);   // بررسی نسخه‌ی جدید از GitHub Releases (فقط در APK)
   function exportExcel() {
     const typeFa = (t) => (t.type === "expense" ? "پرداخت" : t.type === "income" ? "دریافت" : "انتقال");
     const doc = {
@@ -514,42 +523,47 @@ export default function App() {
   async function exitNow() {
     try { if (Capacitor.isNativePlatform()) await CapacitorApp.exitApp(); else window.history.back(); } catch {}
   }
-  async function saveBackupToDevice(payload, filename) {
+  // کپی روی خود گوشی (پوشه‌ی Documents/Rexa)؛ اگر اندروید اجازه ندهد فقط از منوی اشتراک‌گذاری ادامه می‌دهیم
+  async function saveCopyOnDevice(payload, filename) {
+    if (!Capacitor.isNativePlatform()) return null;
+    try {
+      try { await Filesystem.requestPermissions(); } catch {}
+      await Filesystem.writeFile({ path: `Rexa/${filename}`, data: payload, directory: Directory.Documents, encoding: Encoding.UTF8, recursive: true });
+      return { label: "گوشی", ok: true, text: `ذخیره شد (Documents/Rexa)` };
+    } catch { return null; }
+  }
+  // باز کردن پنجره‌ی انتخاب محل ذخیره: فایل‌ها، درایو، وان‌درایو، تلگرام و هر برنامه‌ی دیگری که فایل را می‌پذیرد
+  async function shareBackupFile(payload, filename) {
     if (Capacitor.isNativePlatform()) {
+      let written = null;
       try {
-        try { await Filesystem.requestPermissions(); } catch {}
-        await Filesystem.writeFile({ path: `Rexa/${filename}`, data: payload, directory: Directory.Documents, encoding: Encoding.UTF8, recursive: true });
-        return { ok: true, text: `ذخیره شد (Documents/Rexa/${filename})` };
-      } catch (e1) {
-        // دسترسی مستقیم به پوشه‌ی Documents ممکن نشد: منوی اشتراک‌گذاری (ذخیره در فایل‌ها / درایو / …)
-        let written = null;
-        try {
-          written = await Filesystem.writeFile({ path: filename, data: payload, directory: Directory.Cache, encoding: Encoding.UTF8 });
-          await Share.share({ title: "پشتیبان Rexa", text: "فایل پشتیبان Rexa", files: [written.uri], dialogTitle: "ذخیره‌ی پشتیبان Rexa" });
-          return { ok: true, text: "از منوی اشتراک‌گذاری ذخیره/ارسال شد" };
-        } catch (e2) { return { ok: false, text: "ذخیره‌ی فایل ممکن نشد یا منوی اشتراک‌گذاری بسته شد" }; }
-        finally { if (written) Filesystem.deleteFile({ path: filename, directory: Directory.Cache }).catch(() => {}); }
-      }
+        written = await Filesystem.writeFile({ path: filename, data: payload, directory: Directory.Cache, encoding: Encoding.UTF8 });
+        await Share.share({ title: "پشتیبان Rexa", text: "فایل پشتیبان Rexa", files: [written.uri], dialogTitle: "محل ذخیره‌ی پشتیبان را انتخاب کن" });
+        return { label: "محل ذخیره", ok: true, text: "پنجره‌ی انتخاب باز شد" };
+      } catch (e) {
+        return { label: "محل ذخیره", ok: false, text: "انتخاب محل ذخیره انجام نشد یا بسته شد" };
+      } finally { if (written) Filesystem.deleteFile({ path: filename, directory: Directory.Cache }).catch(() => {}); }
     }
     const blob = new Blob([payload], { type: "application/json" });
     const url = URL.createObjectURL(blob); const a = document.createElement("a");
     a.href = url; a.download = filename; document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
-    return { ok: true, text: "فایل دانلود شد" };
+    return { label: "فایل", ok: true, text: "دانلود شد" };
   }
-  async function runExitBackup({ device, cloud: toCloud, encrypt, pass }) {
+  async function runExitBackup({ encrypt, pass }) {
     const results = [];
-    if (device) {
-      try {
-        const stamp = `${todayISO()}-${new Date().toTimeString().slice(0, 5).replace(":", "")}`;
-        let payload = JSON.stringify(backupState, null, 2), filename = `rexa-backup-${stamp}.json`;
-        if (encrypt) { payload = await encryptSnapshot(backupState, pass, { kind: "backup" }); filename = `rexa-backup-${stamp}.enc.json`; }
-        results.push({ label: "گوشی", ...(await saveBackupToDevice(payload, filename)) });
-      } catch (e) { results.push({ label: "گوشی", ok: false, text: String(e?.message || e) }); }
+    const stamp = `${todayISO()}-${new Date().toTimeString().slice(0, 5).replace(":", "")}`;
+    let payload = JSON.stringify(backupState, null, 2), filename = `rexa-backup-${stamp}.json`;
+    if (encrypt) {
+      try { payload = await encryptSnapshot(backupState, pass, { kind: "backup" }); filename = `rexa-backup-${stamp}.enc.json`; }
+      catch (e) { return [{ label: "رمزگذاری", ok: false, text: String(e?.message || e) }]; }
     }
-    if (toCloud) {
+    const copy = await saveCopyOnDevice(payload, filename);
+    if (copy) results.push(copy);
+    if (syncReady(cloud.cfg)) {   // اگر گیت‌هاب وصل است، نسخه‌ی ابری (رمزگذاری‌شده) هم به‌روز می‌شود
       const r = await cloud.runSync("push");
       results.push({ label: "فضای ابری", ok: !!r?.ok, text: r?.text || (r?.ok ? "انجام شد" : "انجام نشد") });
     }
+    results.push(await shareBackupFile(payload, filename));
     return results;
   }
 
@@ -712,22 +726,20 @@ export default function App() {
             onMic={registerVoiceTransaction} onBell={openBell} alarmCount={alarms.length} />
         )}
 
-        {(updateInfo || cloud.state.conflict) && (
+        {cloud.state.conflict && (
           <div style={{ padding: "8px 12px 0", display: "flex", flexDirection: "column", gap: 6 }}>
             {cloud.state.conflict && (
               <div onClick={() => { setMenuOpen(false); setSubView("cloud"); }} style={{ background: "#fff4e0", color: "#8a5a00", border: "1px solid #f0c777", borderRadius: 10, padding: "9px 12px", fontSize: 12.5, fontWeight: 700, lineHeight: 1.8, cursor: "pointer" }}>
                 داده‌های گیت‌هاب با این گوشی فرق دارد. برای انتخاب (دریافت یا جایگزینی) اینجا را بزنید.
               </div>
             )}
-            {updateInfo && (
-              <div style={{ background: "#e8f7ee", color: "#17603a", border: "1px solid #9fd8b4", borderRadius: 10, padding: "9px 12px", fontSize: 12.5, fontWeight: 700, display: "flex", alignItems: "center", gap: 8 }}>
-                <span style={{ flex: 1, lineHeight: 1.8 }}>نسخه‌ی جدید Rexa آماده است ({updateInfo.name}).</span>
-                <button onClick={() => openExternalUrl(updateInfo.url)} style={{ background: "#17603a", color: "#fff", border: "none", borderRadius: 8, padding: "6px 12px", fontWeight: 800, cursor: "pointer", fontFamily: "inherit" }}>دانلود</button>
-                <button onClick={() => setUpdateInfo(null)} aria-label="بستن" style={{ background: "none", border: "none", color: "#17603a", cursor: "pointer", display: "flex" }}><X size={16} /></button>
-              </div>
-            )}
           </div>
         )}
+
+        {updateInfo && (
+          <button onClick={() => openExternalUrl(updateInfo.url)} aria-label="آپدیت" style={{ position: "fixed", top: "calc(env(safe-area-inset-top, 0px) + 6px)", left: "50%", transform: "translateX(-50%)", zIndex: 590, background: "#17b26a", color: "#fff", border: "none", borderRadius: 14, padding: "3px 16px", fontWeight: 900, fontSize: 12.5, fontFamily: "inherit", cursor: "pointer", boxShadow: "0 2px 8px rgba(0,0,0,.25)" }}>آپدیت</button>
+        )}
+        {notesOpen && <UpdateNotesToast notes={updateInfo?.notes || []} onDone={() => setNotesOpen(false)} />}
 
         {subView ? (
           <SubViewContent subView={subView} ctx={ctx} onBack={() => setSubView(null)} />
@@ -763,7 +775,7 @@ export default function App() {
             )}
             {tab === "transactions" && (
               <TransactionsView
-                transactions={transactions} catById={catById} accById={accById} checks={checks}
+                transactions={transactions} catById={catById} accById={accById} checks={checks} accounts={accounts} categories={categories}
                 filter={txFilter} setFilter={setTxFilter} onDelete={deleteTransaction}
                 onEdit={(tx) => { setPrefillTx({ ...tx, _editId: tx.id }); setShowAdd(true); }}
                 search={txSearch} setSearch={setTxSearch}
@@ -845,7 +857,7 @@ export default function App() {
         )}
         {showAlarms && <AlarmsSheet items={alarms} onClose={() => setShowAlarms(false)} onOpen={openAlarm} notifBlocked={notifBlocked} onEnableNotif={enableNotif}
           onDoneReminder={(id) => setReminders((p) => p.map((r) => r.id === id ? { ...r, done: true } : r))} />}
-        {showExit && <ExitSheet cloudReady={syncReady(cloud.cfg)} onBackup={runExitBackup} onExit={exitNow} onClose={() => setShowExit(false)} />}
+        {showExit && <ExitSheet onBackup={runExitBackup} onExit={exitNow} onClose={() => setShowExit(false)} />}
         {menuOpen && <SideMenu onClose={() => setMenuOpen(false)} setSubView={(v) => { setSubView(v); setMenuOpen(false); }} profileName={settings.profile?.name} />}
       </div>
     </ThemeCtx.Provider>
