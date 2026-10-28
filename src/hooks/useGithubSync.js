@@ -45,7 +45,8 @@ export function useGithubSync({ loaded, getSnapshot, applySnapshot, deps }) {
 
   async function runSync(mode, { force = false } = {}) {
     const c = cfgRef.current;
-    if (!syncReady(c) || busy.current) return;
+    if (!syncReady(c)) return { ok: false, text: "اتصال گیت‌هاب کامل نیست." };
+    if (busy.current) return { ok: false, text: "همگام‌سازی دیگری در حال انجام است." };
     busy.current = true; setState((x) => ({ ...x, busy: true, msg: null }));
     try {
       const remote = await ghGetFile(c);
@@ -55,22 +56,23 @@ export function useGithubSync({ loaded, getSnapshot, applySnapshot, deps }) {
       let action = mode;
       if (mode === "auto") action = !remote.exists ? "push" : !remoteChanged ? (localDirty ? "push" : "none") : (c.lastSha && !localDirty ? "pull" : "conflict");
       else if (mode === "push" && remoteChanged && !force) action = "conflict";
-      if (action === "conflict") { setState({ busy: false, msg: null, conflict: { ...remoteInfo(remote.text), sha: remote.sha } }); return; }
-      if (action === "none") { setState({ busy: false, conflict: null, msg: { ok: true, text: "همه‌چیز با گیت‌هاب یکی است." } }); return; }
+      if (action === "conflict") { setState({ busy: false, msg: null, conflict: { ...remoteInfo(remote.text), sha: remote.sha } }); return { ok: false, conflict: true, text: "نسخه‌ی ابری با این گوشی فرق دارد؛ از صفحه‌ی همگام‌سازی ابری حلش کن." }; }
+      if (action === "none") { setState({ busy: false, conflict: null, msg: { ok: true, text: "همه‌چیز با گیت‌هاب یکی است." } }); return { ok: true, text: "با نسخه‌ی ابری یکی است" }; }
       if (action === "pull") {
-        if (!remote.exists) { setState({ busy: false, conflict: null, msg: { ok: false, text: "هنوز داده‌ای در گیت‌هاب ذخیره نشده است." } }); return; }
+        if (!remote.exists) { setState({ busy: false, conflict: null, msg: { ok: false, text: "هنوز داده‌ای در گیت‌هاب ذخیره نشده است." } }); return { ok: false, text: "داده‌ای در گیت‌هاب نیست" }; }
         const { data } = await decryptSnapshot(remote.text, c.pass);
         applySnapshot(data);
         saveCfg({ lastSha: remote.sha, lastAt: new Date().toISOString() });
         setTimeout(() => { saveCfg({ lastHash: localSnapshotHash(getSnapshot()) }); }, 1500);
         setState({ busy: false, conflict: null, msg: { ok: true, text: "داده‌ها از گیت‌هاب دریافت شد." } });
-        return;
+        return { ok: true, text: "از گیت‌هاب دریافت شد" };
       }
       const text = await encryptSnapshot(snap, c.pass, { device: c.device, build: APP_BUILD });
       const sha = await ghPutFile(c, text, remote.exists ? remote.sha : undefined);
       saveCfg({ lastSha: sha, lastHash: hash, lastAt: new Date().toISOString() });
       setState({ busy: false, conflict: null, msg: { ok: true, text: "داده‌ها (رمزگذاری‌شده) در گیت‌هاب ذخیره شد." } });
-    } catch (e) { fail(e); }
+      return { ok: true, text: "رمزگذاری‌شده در گیت‌هاب ذخیره شد" };
+    } catch (e) { fail(e); return { ok: false, text: syncErrorText(e) }; }
     finally { busy.current = false; }
   }
   // اتصال: ابتدا ریپو و دسترسی بررسی می‌شود؛ ریپوی عمومی پذیرفته نمی‌شود
