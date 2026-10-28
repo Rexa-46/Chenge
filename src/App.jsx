@@ -31,7 +31,8 @@ import { LocalNotifications } from "@capacitor/local-notifications";
 import { AlarmsSheet } from "./components/sheets/AlarmsSheet.jsx";
 import { buildAlarms } from "./domain/alarms.js";
 import { askExactAlarm, exactAlarmStatus, listenNotificationActions, onLoanPayRequest, requestLoanPay, rescheduleDueNotifications } from "./services/notifications.js";
-import { decryptSnapshot, encryptSnapshot } from "./services/githubSync.js";
+import { decryptSnapshot, encryptSnapshot, syncReady } from "./services/githubSync.js";
+import { ExitSheet } from "./components/sheets/ExitSheet.jsx";
 import { isEncryptedBackup, validateBackup } from "./services/backupValidate.js";
 import { makePinRecord, withoutPin } from "./services/pinLock.js";
 import { loadKey, saveKey } from "./services/storage.js";
@@ -507,12 +508,50 @@ export default function App() {
     exportDocXlsx(doc).catch((e) => alert("خروجی Excel گرفته نشد: " + (e?.message || e)));
   }
 
-  const performExit = useCallback(async () => {
-    if (!window.confirm("آیا از خروج از Rexa مطمئن هستید؟")) return;
-    const wantBackup = window.confirm("قبل از خروج پشتیبان‌گیری شود؟\n\nبله = پشتیبان‌گیری و خروج\nخیر = خروج بدون پشتیبان");
-    if (wantBackup) { try { await exportBackup(); } catch {} }
+  // فرم خروج: با پشتیبان (گوشی و/یا فضای ابری) یا بدون پشتیبان
+  const [showExit, setShowExit] = useState(false);
+  const performExit = useCallback(() => { setShowExit(true); }, []);
+  async function exitNow() {
     try { if (Capacitor.isNativePlatform()) await CapacitorApp.exitApp(); else window.history.back(); } catch {}
-  }, [settings, accounts, categories, transactions, journalEntries, budgets, loans, checks, bills, assets, recurring, favorites, members, events, projects, fiscalPeriods, notes, reminders, shortcuts]);
+  }
+  async function saveBackupToDevice(payload, filename) {
+    if (Capacitor.isNativePlatform()) {
+      try {
+        try { await Filesystem.requestPermissions(); } catch {}
+        await Filesystem.writeFile({ path: `Rexa/${filename}`, data: payload, directory: Directory.Documents, encoding: Encoding.UTF8, recursive: true });
+        return { ok: true, text: `ذخیره شد (Documents/Rexa/${filename})` };
+      } catch (e1) {
+        // دسترسی مستقیم به پوشه‌ی Documents ممکن نشد: منوی اشتراک‌گذاری (ذخیره در فایل‌ها / درایو / …)
+        let written = null;
+        try {
+          written = await Filesystem.writeFile({ path: filename, data: payload, directory: Directory.Cache, encoding: Encoding.UTF8 });
+          await Share.share({ title: "پشتیبان Rexa", text: "فایل پشتیبان Rexa", files: [written.uri], dialogTitle: "ذخیره‌ی پشتیبان Rexa" });
+          return { ok: true, text: "از منوی اشتراک‌گذاری ذخیره/ارسال شد" };
+        } catch (e2) { return { ok: false, text: "ذخیره‌ی فایل ممکن نشد یا منوی اشتراک‌گذاری بسته شد" }; }
+        finally { if (written) Filesystem.deleteFile({ path: filename, directory: Directory.Cache }).catch(() => {}); }
+      }
+    }
+    const blob = new Blob([payload], { type: "application/json" });
+    const url = URL.createObjectURL(blob); const a = document.createElement("a");
+    a.href = url; a.download = filename; document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
+    return { ok: true, text: "فایل دانلود شد" };
+  }
+  async function runExitBackup({ device, cloud: toCloud, encrypt, pass }) {
+    const results = [];
+    if (device) {
+      try {
+        const stamp = `${todayISO()}-${new Date().toTimeString().slice(0, 5).replace(":", "")}`;
+        let payload = JSON.stringify(backupState, null, 2), filename = `rexa-backup-${stamp}.json`;
+        if (encrypt) { payload = await encryptSnapshot(backupState, pass, { kind: "backup" }); filename = `rexa-backup-${stamp}.enc.json`; }
+        results.push({ label: "گوشی", ...(await saveBackupToDevice(payload, filename)) });
+      } catch (e) { results.push({ label: "گوشی", ok: false, text: String(e?.message || e) }); }
+    }
+    if (toCloud) {
+      const r = await cloud.runSync("push");
+      results.push({ label: "فضای ابری", ok: !!r?.ok, text: r?.text || (r?.ok ? "انجام شد" : "انجام نشد") });
+    }
+    return results;
+  }
 
   // قفل دوباره: اگر برنامه بیش از ۳۰ ثانیه در پس‌زمینه بماند، با برگشت دوباره قفل می‌شود
   // (ساعت عقب‌رفته یا زمان نامعتبر هم یعنی قفل)
@@ -533,7 +572,7 @@ export default function App() {
   // دکمه‌ی برگشت اندروید: فقط یک شنونده‌ی ثابت ثبت می‌شود و آخرین state را از ref می‌خواند
   // (قبلاً با هر تغییر state دوباره و به‌صورت async ثبت می‌شد و شنونده‌های هم‌زمان می‌ماند)
   const backStateRef = useRef({});
-  backStateRef.current = { showAdd, showQuickAdd, showCapture, menuOpen, subView, tab, showAlarms, showNoteModal, showReminderModal, performExit };
+  backStateRef.current = { showExit, showAdd, showQuickAdd, showCapture, menuOpen, subView, tab, showAlarms, showNoteModal, showReminderModal, performExit };
   const exitingRef = useRef(false);
   useEffect(() => {
     if (!loaded || !Capacitor.isNativePlatform()) return;
@@ -543,6 +582,7 @@ export default function App() {
       const stack = window.__rexaBack || [];
       const topOverlay = stack[stack.length - 1];
       if (topOverlay) { topOverlay(); return; }
+      if (st.showExit) { setShowExit(false); return; }
       if (st.showAlarms) { setShowAlarms(false); return; }
       if (st.showNoteModal) { setShowNoteModal(false); return; }
       if (st.showReminderModal) { setShowReminderModal(false); return; }
@@ -554,7 +594,7 @@ export default function App() {
       if (st.tab !== "home") { setTab("home"); return; }
       if (exitingRef.current) return;   // پرسش خروج دوبار نمایش داده نشود
       exitingRef.current = true;
-      try { await st.performExit(); } finally { exitingRef.current = false; }
+      try { st.performExit(); } finally { exitingRef.current = false; }
     }).then((h) => { if (cancelled) h.remove?.(); else handle = h; }).catch(() => {});
     return () => { cancelled = true; handle?.remove?.(); };
   }, [loaded]);
@@ -805,6 +845,7 @@ export default function App() {
         )}
         {showAlarms && <AlarmsSheet items={alarms} onClose={() => setShowAlarms(false)} onOpen={openAlarm} notifBlocked={notifBlocked} onEnableNotif={enableNotif}
           onDoneReminder={(id) => setReminders((p) => p.map((r) => r.id === id ? { ...r, done: true } : r))} />}
+        {showExit && <ExitSheet cloudReady={syncReady(cloud.cfg)} onBackup={runExitBackup} onExit={exitNow} onClose={() => setShowExit(false)} />}
         {menuOpen && <SideMenu onClose={() => setMenuOpen(false)} setSubView={(v) => { setSubView(v); setMenuOpen(false); }} profileName={settings.profile?.name} />}
       </div>
     </ThemeCtx.Provider>
