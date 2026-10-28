@@ -2,6 +2,8 @@ import { startTransition, useCallback, useEffect, useMemo, useRef, useState } fr
 import { exportDocXlsx } from "./services/exportDoc.js";
 import { isPnlTransaction, pnlAmount } from "./domain/financialEngine.js";
 import { rebuildLedger } from "./domain/ledgerEngine.js";
+import { buildHeadingTree } from "./domain/headingTree.js";
+import { usePersistedState } from "./hooks/usePersistedState.js";
 import { App as CapacitorApp } from "@capacitor/app";
 import { Capacitor } from "@capacitor/core";
 import { Directory, Encoding, Filesystem } from "@capacitor/filesystem";
@@ -89,11 +91,11 @@ export default function App() {
   const [notifBlocked, setNotifBlocked] = useState(false);
   const [showAdd, setShowAdd] = useState(false);
   const [prefillTx, setPrefillTx] = useState(null);
-  const [open, setOpen] = useState({ shortcut: true });
+  const [open, setOpen] = usePersistedState("homeOpen", { shortcut: true });   // بخش‌های باز خانه مثل آخرین خروج باز می‌مانند
   const [year, setYear] = useState(jalaliYear(new Date()));
   const [homeDay, setHomeDay] = useState(todayISO());
-  const [txFilter, setTxFilter] = useState("all");
-  const [txSearch, setTxSearch] = useState("");
+  const [txFilter, setTxFilter] = usePersistedState("txFilter", "all");
+  const [txSearch, setTxSearch] = usePersistedState("txSearch", "");
   const [menuOpen, setMenuOpen] = useState(false);
   const [showQuickAdd, setShowQuickAdd] = useState(false);
   const [showNoteModal, setShowNoteModal] = useState(false);
@@ -302,6 +304,12 @@ export default function App() {
   const totalIncomeYear = useMemo(() => yearTx.filter((t) => t.type === "income" && isPnlTransaction(t)).reduce((s, t) => s + pnlAmount(t), 0), [yearTx]);
   const totalExpenseYear = useMemo(() => yearTx.filter((t) => t.type === "expense" && isPnlTransaction(t)).reduce((s, t) => s + pnlAmount(t), 0), [yearTx]);
   const gaugeMax = Math.max(totalIncomeYear, totalExpenseYear, 1);
+  // «مانده سالانه» = دریافت‌ها − پرداخت‌های واقعی سال (همان ارقامی که در تراکنش‌ها و گزارش‌ها دیده می‌شود)؛ انتقال بین حساب‌ها حساب نمی‌شود
+  const incomeCashYear = useMemo(() => yearTx.filter((t) => t.type === "income").reduce((s, t) => s + Number(t.amount || 0), 0), [yearTx]);
+  const expenseCashYear = useMemo(() => yearTx.filter((t) => t.type === "expense").reduce((s, t) => s + Number(t.amount || 0), 0), [yearTx]);
+  const pnlAmt = (x) => (isPnlTransaction(x) ? pnlAmount(x) : 0);
+  const expenseTree = useMemo(() => buildHeadingTree(yearTx, "expense", categories, pnlAmt), [yearTx, categories]);
+  const incomeTree = useMemo(() => buildHeadingTree(yearTx, "income", categories, pnlAmt), [yearTx, categories]);
 
   const expenseByCategory = useMemo(() => {
     const map = {};
@@ -370,6 +378,18 @@ export default function App() {
     const used = transactions.some((t) => t.categoryId === id) || budgets.some((b) => b.categoryId === id) || categories.some((c) => c.parentId === id);
     if (used) { setCategories((p) => p.map((c) => c.id === id ? { ...c, active: false, archivedAt: new Date().toISOString() } : c)); alert("این سرفصل سابقه مالی دارد و حذف نشد؛ به‌جای حذف، بایگانی شد."); return; }
     setCategories((p) => p.filter((c) => c.id !== id && c.parentId !== id));
+  }
+  // انتقال یک حساب با همه‌ی زیرمجموعه‌هایش زیر سرفصل دیگر (یا به سطح اول یک گروه)
+  function moveCategory(id, parentId, kind) {
+    setCategories((prev) => {
+      const target = prev.find((c) => c.id === id);
+      if (!target || parentId === id) return prev;
+      const desc = new Set([id]); let grew = true;
+      while (grew) { grew = false; prev.forEach((c) => { if (c.parentId && desc.has(c.parentId) && !desc.has(c.id)) { desc.add(c.id); grew = true; } }); }
+      if (parentId && desc.has(parentId)) return prev;   // انتقال به زیرمجموعه‌ی خودش حلقه می‌سازد
+      const newKind = parentId ? (prev.find((c) => c.id === parentId)?.kind || kind || target.kind) : (kind || target.kind);
+      return prev.map((c) => (!desc.has(c.id) ? c : c.id === id ? { ...c, parentId: parentId || undefined, kind: newKind } : { ...c, kind: newKind }));
+    });
   }
   function updateCategory(id, patch) { setCategories((p) => p.map((c) => c.id === id ? { ...c, ...patch } : c)); }
   function upsertBudget(categoryId, amount) {
@@ -620,7 +640,7 @@ export default function App() {
 
   const ctx = {
     accounts, addAccount, deleteAccount, updateAccount, accountBalance, accountEditTarget, setAccountEditTarget, focusId, setFocusId,
-    categories, addCategory, deleteCategory, updateCategory,
+    categories, addCategory, deleteCategory, updateCategory, moveCategory,
     budgets, upsertBudget, expenseByCategory, incomeByCategory,
     loans, setLoans, checks, setChecks, bills, setBills, assets, setAssets,
     recurring, setRecurring, favorites, toggleFavorite, shortcuts, setShortcuts,
@@ -677,6 +697,7 @@ export default function App() {
               <HomeView
                 year={year} setYear={setYear}
                 totalIncomeYear={totalIncomeYear} totalExpenseYear={totalExpenseYear} gaugeMax={gaugeMax}
+                incomeCashYear={incomeCashYear} expenseCashYear={expenseCashYear} expenseTree={expenseTree} incomeTree={incomeTree}
                 open={open} toggle={toggle}
                 accounts={accounts} accountBalance={accountBalance}
                 expenseByCategory={expenseByCategory} incomeByCategory={incomeByCategory}
@@ -719,7 +740,8 @@ export default function App() {
                 expenseByMember={expenseByMember} expenseByEvent={expenseByEvent} expenseByProject={expenseByProject}
                 categories={categories} checks={checks} debts={debts} totalAssets={totalAssets} currency={settings.currency} usdRate={rates?.usd}
                 transactions={transactions} updateAccount={updateAccount}
-                members={members} events={events} projects={projects} loans={loans} assets={assets} bills={bills}
+                members={members} events={events} projects={projects} loans={loans} assets={assets} bills={bills} recurring={recurring}
+                openItem={(view, id) => { setFocusId(id); setSubView(view); }}
               />
             )}
           </div>

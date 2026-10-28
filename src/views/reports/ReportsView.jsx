@@ -1,4 +1,8 @@
 import { useMemo, useState } from "react";
+import { buildHeadingTree, flattenHeadingTree } from "../../domain/headingTree.js";
+import { usePersistedState } from "../../hooks/usePersistedState.js";
+import { ForecastSection } from "../../components/reports/ForecastSection.jsx";
+import { HeadingBreakdown } from "../../components/reports/HeadingBreakdown.jsx";
 import { ChevronRight } from "lucide-react";
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
@@ -22,10 +26,10 @@ import { REPORT_TILES, ReportTiles } from "./ReportTiles.jsx";
 import { StatementReport } from "./StatementReport.jsx";
 import { SummaryReport } from "./SummaryReport.jsx";
 
-export function ReportsView({ members = [], events = [], projects = [], loans = [], assets = [], bills = [], categories = [], expenseByCategory, incomeByCategory, totalIncomeYear, totalExpenseYear, accounts, accountBalance, updateAccount, netWorthTrend, exportExcel, expenseByMember, expenseByEvent, expenseByProject, checks = [], debts = [], totalAssets = 0, currency, usdRate, transactions = [] }) {
+export function ReportsView({ members = [], events = [], projects = [], loans = [], assets = [], bills = [], categories = [], expenseByCategory, incomeByCategory, totalIncomeYear, totalExpenseYear, accounts, accountBalance, updateAccount, netWorthTrend, exportExcel, expenseByMember, expenseByEvent, expenseByProject, checks = [], debts = [], totalAssets = 0, currency, usdRate, transactions = [], recurring = [], openItem }) {
   const st = useStyles();
-  const [sub, setSub] = useState(null);
-  const [period, setPeriod] = useState("year");
+  const [sub, setSub] = usePersistedState("reportsSub", null);          // آخرین گزارشی که باز بود
+  const [period, setPeriod] = usePersistedState("reportsPeriod", "year");
   const [selectedAccount, setSelectedAccount] = useState(null); const [selectedMember, setSelectedMember] = useState(null); const [editBalance, setEditBalance] = useState("");
   const periodTx = useMemo(() => {
     const today = todayISO();
@@ -38,11 +42,8 @@ export function ReportsView({ members = [], events = [], projects = [], loans = 
   const reportExpense = periodTx.filter((x) => x.type === "expense").reduce((s, x) => s + x.amount, 0);
   const incomeExpensePie = [{ name: "درآمد", amount: reportIncome }, { name: "هزینه", amount: reportExpense }].filter((d) => d.amount > 0);
   const profit = reportIncome - reportExpense;
-  const reportExpenseByCategory = useMemo(() => {
-    const map = {};
-    periodTx.filter((x) => x.type === "expense").forEach((x) => { map[x.categoryId] = (map[x.categoryId] || 0) + x.amount; });
-    return Object.entries(map).map(([catId, amount]) => ({ name: categories.find((c) => c.id === catId)?.name || "بدون دسته", amount, catId })).sort((a,b) => b.amount-a.amount);
-  }, [periodTx, categories]);
+  const expenseTree = useMemo(() => buildHeadingTree(periodTx, "expense", categories), [periodTx, categories]);
+  const incomeTree = useMemo(() => buildHeadingTree(periodTx, "income", categories), [periodTx, categories]);
   const accountDetails = useMemo(() => {
     if (!selectedAccount) return { income: 0, expense: 0, transfersIn: 0, transfersOut: 0, txs: [] };
     const txs = periodTx.filter((x) => x.accountId === selectedAccount.id || x.toAccountId === selectedAccount.id);
@@ -77,7 +78,8 @@ export function ReportsView({ members = [], events = [], projects = [], loans = 
         ["طلب‌ها", debts.filter((d) => !d.settled && d.kind === "receivable").reduce((s2, d) => s2 + Number(d.amount || 0), 0)],
         ["بدهی‌ها", debts.filter((d) => !d.settled && d.kind === "payable").reduce((s2, d) => s2 + Number(d.amount || 0), 0)],
         ["درآمد این دوره", reportIncome], ["هزینه این دوره", -reportExpense], ["سود / زیان خالص", profit]] },
-      { title: "هزینه به تفکیک دسته", head: ["دسته", "مبلغ"], rows: reportExpenseByCategory.map((x) => [x.name, x.amount]) },
+      { title: "هزینه به تفکیک سرفصل", head: ["سرفصل", "مبلغ"], rows: flattenHeadingTree(expenseTree).map((x) => [x.name, x.amount]) },
+      { title: "درآمد به تفکیک سرفصل", head: ["سرفصل", "مبلغ"], rows: flattenHeadingTree(incomeTree).map((x) => [x.name, x.amount]) },
       { title: "موجودی حساب‌ها", head: ["حساب", "نوع", "موجودی"], rows: accounts.map((a) => [a.name, accTypeFa(a.type), accountBalance(a.id)]) },
       { title: "تراکنش‌های این دوره", head: ["تاریخ", "نوع", "مبلغ", "دسته", "حساب", "یادداشت"], rows: [...periodTx].sort((x, y) => y.date.localeCompare(x.date)).map((x) => [jf(x.date), x.type === "income" ? "دریافت" : x.type === "expense" ? "پرداخت" : "انتقال", x.amount, categories.find((c) => c.id === x.categoryId)?.name || "", accounts.find((a) => a.id === x.accountId)?.name || "", x.note || ""]) },
     ],
@@ -133,7 +135,7 @@ export function ReportsView({ members = [], events = [], projects = [], loans = 
         </div>
       </div>
 
-      <SectionTitle text="سود و زیان سالانه" />
+      <SectionTitle text={`سود و زیان ${periodLabel}`} />
       <div style={{ ...st.card, padding: 14, marginBottom: 18 }}>
         <Row title="مجموع درآمد" value={formatMoney(reportIncome, currency, usdRate)} valueColor={BRAND.darkgreen} chevron={null} />
         <Row title="مجموع هزینه" value={formatMoney(reportExpense, currency, usdRate)} valueColor={BRAND.crimson} chevron={null} />
@@ -158,9 +160,17 @@ export function ReportsView({ members = [], events = [], projects = [], loans = 
         <ExplodingPie data={incomeExpensePie} currency={currency} usdRate={usdRate} />
       </div>
 
-      <SectionTitle text="توزیع هزینه‌ها بر اساس دسته" />
+      <SectionTitle text="پیش‌بینی پرداخت‌ها" />
+      <ForecastSection loans={loans} recurring={recurring} bills={bills} checks={checks} categories={categories} currency={currency} usdRate={usdRate} onOpenItem={openItem} />
+
+      <SectionTitle text="توزیع هزینه‌ها بر اساس سرفصل (لمس برای زیرمجموعه)" />
       <div style={{ marginBottom: 18 }}>
-        <ExpenseDistribution data={reportExpenseByCategory} transactions={transactions} currency={currency} usdRate={usdRate} />
+        <ExpenseDistribution data={expenseTree} transactions={transactions} currency={currency} usdRate={usdRate} />
+      </div>
+
+      <SectionTitle text="درآمدها بر اساس سرفصل (لمس برای زیرمجموعه)" />
+      <div style={{ ...st.card, padding: "4px 12px", marginBottom: 18 }}>
+        <HeadingBreakdown tree={incomeTree} color={BRAND.darkgreen} currency={currency} usdRate={usdRate} empty="درآمدی در این بازه ثبت نشده" />
       </div>
 
       <SectionTitle text="گزارش چک‌ها" />

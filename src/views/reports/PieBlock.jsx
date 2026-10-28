@@ -3,7 +3,8 @@ import { Cell, Pie, PieChart, ResponsiveContainer } from "recharts";
 import { useT } from "../../theme/ThemeContext.js";
 import { PIE_COLORS } from "../../theme/chartColors.js";
 import { useStyles } from "../../theme/styles.js";
-import { faDigits, toFaInt } from "../../utils/format.js";
+import { toFaInt } from "../../utils/format.js";
+import { HeadingBreakdown } from "../../components/reports/HeadingBreakdown.jsx";
 
 export function PieBlock({ title, data, color }) {
   const t = useT(); const st = useStyles();
@@ -20,14 +21,7 @@ export function PieBlock({ title, data, color }) {
               </Pie>
             </PieChart>
           </ResponsiveContainer>
-          {data.map((d, i) => (
-            <div key={d.name + i} style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 2px", borderTop: `1px solid ${t.border}` }}>
-              <span style={{ width: 10, height: 10, borderRadius: "50%", background: PIE_COLORS[i % PIE_COLORS.length], flexShrink: 0 }} />
-              <span style={{ flex: 1, fontSize: 13, fontWeight: 600 }}>{d.name}</span>
-              <span style={{ fontSize: 11.5, color: t.sub }}>{faDigits(Math.round((d.amount / total) * 100))}٪</span>
-              <span style={{ fontSize: 13, fontWeight: 800, color }}>{toFaInt(d.amount)}</span>
-            </div>
-          ))}
+          <HeadingBreakdown tree={data} color={color} total={total} currency="rial" />
         </>
       )}
     </div>

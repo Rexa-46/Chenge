@@ -13,7 +13,7 @@ import { RangePicker } from "./RangePicker.jsx";
 
 export function BalancesReport({ accounts, transactions }) {
   const st = useStyles(); const t = useT();
-  const rs = useRangeState("day");
+  const rs = useRangeState("day", "balances");
   const { from, to } = rs.range;
   const rows = useMemo(() => accounts.map((a) => {
     const opening = balanceAtDate(a, transactions, addDays(from, -1)), f = accountFlow(a, transactions, from, to);

@@ -28,6 +28,7 @@ import { navArrowStyle } from "../../theme/styles.js";
 
 export function HomeView({
   year, setYear, totalIncomeYear, totalExpenseYear, gaugeMax, open, toggle,
+  incomeCashYear = 0, expenseCashYear = 0, expenseTree = [], incomeTree = [],
   accounts, accountBalance, expenseByCategory, incomeByCategory, budgets, categories,
   transactions, allTransactions, bills, loans, checks, assets, totalAssets, persons = [], debts = [],
   openAccounts, onEditAccount, openBudgets, openBills, openLoans, openChecks, openAssets, openPersons, openDebts, openSubView,
@@ -37,12 +38,14 @@ export function HomeView({
   const t = useT();
   const [openItem, setOpenItem] = useState(null);   // فقط یک سطر همزمان باز است
   const [openTxId, setOpenTxId] = useState(null);   // فقط یک سند داخل سطر باز است
+  const [openNodes, setOpenNodes] = useState({});
   const toggleItem = (k) => { setOpenTxId(null); setOpenItem((o) => (o === k ? null : k)); };
   const accNameOf = (id) => accounts.find((a) => a.id === id)?.name || "—";
   const banks = accounts.filter((a) => a.type === "bank");
   const funds = accounts.filter((a) => a.type === "fund");
   const cardAccs = accounts.filter((a) => a.type === "card");
-  const net = totalIncomeYear - totalExpenseYear;
+  const net = totalIncomeYear - totalExpenseYear;            // سود/زیان عملیاتی (بدون اصل وام)
+  const netCash = incomeCashYear - expenseCashYear;           // مانده‌ی واقعی سال
   const upcomingBills = bills.filter((b) => !b.paid && daysUntil(b.dueDate) <= 5).sort((a, b) => a.dueDate.localeCompare(b.dueDate));
   const upcomingChecks = checks.filter((c) => c.status === "pending" && daysUntil(c.dueDate) <= (settings.checkReminderDays || 7)).sort((a, b) => a.dueDate.localeCompare(b.dueDate));
   const currency = settings.currency, usdRate = rates?.usd;
@@ -70,60 +73,71 @@ export function HomeView({
     if (tx.sourceType === "debt" && tx.sourceId) return ["debts", tx.sourceId, "بدهی/طلب"];
     return null;
   }
-  function categoryDocs(kind, color) {
-    const list = kind === "expense" ? expenseByCategory : incomeByCategory;
-    if (list.length === 0) return <EmptyRow text={kind === "expense" ? "هزینه‌ای ثبت نشده" : "درآمدی ثبت نشده"} />;
-    return list.map((e) => {
-      const k = `${kind}:${e.catId}`;
-      const isOpen = openItem === k;
-      const txs = isOpen
-        ? transactions.filter((x) => x.type === kind && isPnlTransaction(x) && String(x.categoryId) === String(e.catId))
-            .sort((a, b) => `${b.date}${b.time || ""}`.localeCompare(`${a.date}${a.time || ""}`))
-        : [];
-      return (
-        <div key={e.catId}>
-          <Row title={e.name} subtitle={isOpen ? `${toFaInt(txs.length)} سند` : "لمس برای مشاهده سندها"} value={formatMoney(e.amount, currency, usdRate)} valueColor={color}
-            onClick={() => toggleItem(k)} chevron={isOpen ? "right" : "left"} />
-          {isOpen && (
-            <div style={{ margin: "0 0 8px", paddingRight: 8 }}>
-              {txs.length === 0 && <EmptyRow text="سندی یافت نشد" />}
-              {txs.map((x) => {
-                const txOpen = openTxId === x.id;
-                const src = txSourceOf(x);
-                const pnl = pnlAmount(x);
-                const lines = [
-                  ["مبلغ", formatMoney(x.amount, currency, usdRate)],
-                  ...(Number(pnl) !== Number(x.amount) ? [[kind === "expense" ? "سهم در هزینه" : "سهم در درآمد", formatMoney(pnl, currency, usdRate)]] : []),
-                  ["تاریخ", `${x.date ? faLongDate(new Date(x.date)) : "—"}${x.time ? ` · ${faDigits(x.time)}` : ""}`],
-                  ["دسته", e.name],
-                  ["حساب", accNameOf(x.accountId)],
-                  ["توضیحات", x.note || "—"],
-                ];
-                return (
-                  <div key={x.id}>
-                    <Row title={x.note || e.name} subtitle={x.date ? faLongDate(new Date(x.date)) : undefined} value={formatMoney(pnl, currency, usdRate)} valueColor={color}
-                      onClick={() => setOpenTxId((o) => (o === x.id ? null : x.id))} chevron={txOpen ? "right" : "left"} />
-                    {txOpen && (
-                      <DetailBox lines={lines}>
-                        <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
-                          {src ? (
-                            <button onClick={() => onOpenItem?.(src[0], src[1])} style={detailActionBtn(BRAND.violet, true)}>مدیریت از بخش {src[2]}</button>
-                          ) : (<>
-                            <button onClick={() => onEditTransaction?.(x)} style={detailActionBtn(BRAND.violet, true)}>ویرایش</button>
-                            <button onClick={() => { if (window.confirm("این تراکنش حذف شود؟")) { onDeleteTransaction?.(x.id); setOpenTxId(null); } }} style={detailActionBtn(BRAND.crimson, false)}>حذف</button>
-                          </>)}
-                        </div>
-                        {src && <div style={{ fontSize: 11, color: t.sub, marginTop: 8, lineHeight: 1.8 }}>این سند از بخش {src[2]} ساخته شده و برای حفظ صحت حساب‌ها فقط از همان بخش قابل اصلاح است.</div>}
-                      </DetailBox>
-                    )}
+  // سندهای مستقیمِ یک حساب (همان فهرست قبلی)؛ هر سطر با لمس باز می‌شود
+  function docRows(kind, color, catId, name) {
+    const txs = transactions.filter((x) => x.type === kind && isPnlTransaction(x) && String(x.categoryId) === String(catId))
+      .sort((a, b) => `${b.date}${b.time || ""}`.localeCompare(`${a.date}${a.time || ""}`));
+    return (
+      <div style={{ margin: "0 0 8px", paddingRight: 8 }}>
+        {txs.length === 0 && <EmptyRow text="سندی یافت نشد" />}
+        {txs.map((x) => {
+          const txOpen = openTxId === x.id;
+          const src = txSourceOf(x);
+          const pnl = pnlAmount(x);
+          const lines = [
+            ["مبلغ", formatMoney(x.amount, currency, usdRate)],
+            ...(Number(pnl) !== Number(x.amount) ? [[kind === "expense" ? "سهم در هزینه" : "سهم در درآمد", formatMoney(pnl, currency, usdRate)]] : []),
+            ["تاریخ", `${x.date ? faLongDate(new Date(x.date)) : "—"}${x.time ? ` · ${faDigits(x.time)}` : ""}`],
+            ["دسته", name],
+            ["حساب", accNameOf(x.accountId)],
+            ["توضیحات", x.note || "—"],
+          ];
+          return (
+            <div key={x.id}>
+              <Row title={x.note || name} subtitle={x.date ? faLongDate(new Date(x.date)) : undefined} value={formatMoney(pnl, currency, usdRate)} valueColor={color}
+                onClick={() => setOpenTxId((o) => (o === x.id ? null : x.id))} chevron={txOpen ? "right" : "left"} />
+              {txOpen && (
+                <DetailBox lines={lines}>
+                  <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+                    {src ? (
+                      <button onClick={() => onOpenItem?.(src[0], src[1])} style={detailActionBtn(BRAND.violet, true)}>مدیریت از بخش {src[2]}</button>
+                    ) : (<>
+                      <button onClick={() => onEditTransaction?.(x)} style={detailActionBtn(BRAND.violet, true)}>ویرایش</button>
+                      <button onClick={() => { if (window.confirm("این تراکنش حذف شود؟")) { onDeleteTransaction?.(x.id); setOpenTxId(null); } }} style={detailActionBtn(BRAND.crimson, false)}>حذف</button>
+                    </>)}
                   </div>
-                );
-              })}
+                  {src && <div style={{ fontSize: 11, color: t.sub, marginTop: 8, lineHeight: 1.8 }}>این سند از بخش {src[2]} ساخته شده و برای حفظ صحت حساب‌ها فقط از همان بخش قابل اصلاح است.</div>}
+                </DetailBox>
+              )}
             </div>
-          )}
+          );
+        })}
+      </div>
+    );
+  }
+  // سرفصل‌ها: لمس هر سرفصل زیرمجموعه‌ها (و سندهای مستقیمش) را نشان می‌دهد
+  function categoryDocs(kind, color) {
+    const tree = kind === "expense" ? expenseTree : incomeTree;
+    if (!tree.length) return <EmptyRow text={kind === "expense" ? "هزینه‌ای ثبت نشده" : "درآمدی ثبت نشده"} />;
+    const renderNode = (n, depth, ownRow) => {
+      const k = `${kind}:${ownRow ? "own:" : ""}${n.id}`;
+      const isOpen = !!openNodes[k];
+      const kids = ownRow ? [] : n.children;
+      const amount = ownRow ? n.own : n.amount;
+      const expandable = kids.length > 0 || true;
+      return (
+        <div key={k} style={depth ? { paddingRight: 10 } : undefined}>
+          <Row title={ownRow ? `${n.name} (مستقیم)` : n.name}
+            subtitle={isOpen ? (kids.length ? `${toFaInt(kids.length)} زیرمجموعه` : "") : kids.length ? `${toFaInt(kids.length)} زیرمجموعه · لمس برای مشاهده` : "لمس برای مشاهده سندها"}
+            value={formatMoney(amount, currency, usdRate)} valueColor={color}
+            onClick={expandable ? () => { setOpenTxId(null); setOpenNodes((o) => ({ ...o, [k]: !o[k] })); } : undefined} chevron={isOpen ? "right" : "left"} />
+          {isOpen && (kids.length
+            ? (<>{n.own > 0 && renderNode(n, depth + 1, true)}{kids.map((c) => renderNode(c, depth + 1, false))}</>)
+            : docRows(kind, color, n.id, n.name))}
         </div>
       );
-    });
+    };
+    return tree.map((n) => renderNode(n, 0, false));
   }
   function accountDoc(a) {
     const k = `acc:${a.id}`;
@@ -301,12 +315,17 @@ export function HomeView({
         </button>
       </div>
 
-      <div style={{ textAlign: "center", marginBottom: 12, fontSize: 13, color: net >= 0 ? BRAND.darkgreen : BRAND.crimson, fontWeight: 700 }}>
-        مانده سالانه: {toFaInt(Math.abs(net))} ریال {net >= 0 ? "مثبت" : "منفی"}
+      <div style={{ textAlign: "center", marginBottom: Math.abs(net - netCash) > 0.5 ? 4 : 12, fontSize: 13, color: netCash >= 0 ? BRAND.darkgreen : BRAND.crimson, fontWeight: 700 }}>
+        مانده سالانه: {formatMoney(Math.abs(netCash), currency, usdRate)} {netCash >= 0 ? "مثبت" : "منفی"}
       </div>
+      {Math.abs(net - netCash) > 0.5 && (
+        <div style={{ textAlign: "center", marginBottom: 12, fontSize: 11.5, color: t.sub, lineHeight: 1.8 }}>
+          سود/زیان عملیاتی (بدون اصل وام و اقساط): {formatMoney(Math.abs(net), currency, usdRate)} {net >= 0 ? "سود" : "زیان"}
+        </div>
+      )}
       {totalAssets > 0 && (
         <div style={{ textAlign: "center", marginBottom: 18, fontSize: 12.5, color: BRAND.orange, fontWeight: 700 }}>
-          ارزش دارایی‌های دیجیتال/بورس: {toFaInt(totalAssets)} ریال
+          ارزش دارایی‌های دیجیتال/بورس: {formatMoney(totalAssets, currency, usdRate)}
         </div>
       )}
 

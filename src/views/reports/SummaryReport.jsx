@@ -1,6 +1,9 @@
 import { useMemo, useState } from "react";
 
-import { accountFlow, balanceAtDate, catTotals, pctText } from "../../domain/reportMath.js";
+import { accountFlow, balanceAtDate, pctText } from "../../domain/reportMath.js";
+import { buildHeadingTree, flattenHeadingTree } from "../../domain/headingTree.js";
+import { usePersistedState } from "../../hooks/usePersistedState.js";
+import { PieBlock } from "./PieBlock.jsx";
 import { useRangeState } from "../../hooks/useRangeState.js";
 import { useT } from "../../theme/ThemeContext.js";
 import { BRAND } from "../../theme/palette.js";
@@ -14,8 +17,9 @@ import { RangePicker } from "./RangePicker.jsx";
 
 export function SummaryReport({ accounts, transactions, categories }) {
   const st = useStyles(); const t = useT();
-  const rs = useRangeState("month");
-  const [accId, setAccId] = useState(accounts[0]?.id || null);
+  const rs = useRangeState("month", "summary");
+  const [savedAcc, setAccId] = usePersistedState("summaryAcc", null);
+  const accId = accounts.some((a) => a.id === savedAcc) ? savedAcc : accounts[0]?.id || null;
   const acc = accounts.find((a) => a.id === accId);
   const { from, to } = rs.range;
   const data = useMemo(() => {
@@ -23,14 +27,14 @@ export function SummaryReport({ accounts, transactions, categories }) {
     const opening = balanceAtDate(acc, transactions, addDays(from, -1));
     const f = accountFlow(acc, transactions, from, to);
     const closing = opening + f.income + f.tin - f.expense - f.tout;
-    const cats = catTotals(transactions.filter((x) => x.accountId === acc.id && x.date >= from && x.date <= to), "expense", categories);
+    const cats = buildHeadingTree(transactions.filter((x) => x.accountId === acc.id && x.date >= from && x.date <= to), "expense", categories);
     return { opening, f, closing, cats };
   }, [acc, transactions, categories, from, to]);
   const doc = data && {
     title: `خلاصه گزارش - ${acc.name}`, subtitle: `از ${jf(from)} تا ${jf(to)}`,
     sections: [
       { title: "خلاصه", rows: [["مانده ابتدای دوره", data.opening], ["جمع دریافت‌ها", data.f.income], ["جمع پرداخت‌ها", -data.f.expense], ["انتقال به این حساب", data.f.tin], ["انتقال از این حساب", -data.f.tout], ["مانده پایان دوره", data.closing], ["تعداد تراکنش", toFaInt(data.f.count)]] },
-      { title: "هزینه به تفکیک دسته", head: ["دسته", "مبلغ", "درصد"], rows: data.cats.map((c) => [c.name, c.amount, pctText(c.amount, data.f.expense)]) },
+      { title: "هزینه به تفکیک سرفصل", head: ["دسته", "مبلغ", "درصد"], rows: flattenHeadingTree(data.cats).map((c) => [c.name, c.amount, pctText(c.amount, data.f.expense)]) },
     ],
   };
   return (
@@ -46,7 +50,8 @@ export function SummaryReport({ accounts, transactions, categories }) {
             <div style={{ fontSize: 12, color: t.sub }}>مانده پایان دوره — {acc.name}</div>
             <div style={{ fontSize: 24, fontWeight: 800, color: data.closing >= 0 ? BRAND.darkgreen : BRAND.crimson, marginTop: 4 }}>{toFaInt(data.closing)} <span style={{ fontSize: 12 }}>ریال</span></div>
           </div>
-          <DocView doc={doc} />
+          <DocView doc={{ sections: [doc.sections[0]] }} />
+          <PieBlock title="هزینه به تفکیک سرفصل" data={data.cats} color={BRAND.crimson} />
         </>
       ) : <div style={{ textAlign: "center", color: t.sub, padding: 20 }}>ابتدا یک حساب تعریف کنید.</div>}
     </div>

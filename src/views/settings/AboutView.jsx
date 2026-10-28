@@ -14,7 +14,7 @@ export function AboutView({ updateInfo, updateMsg, checkUpdateNow }) {
     <RexaLogo size={78} />
     <div style={{ fontWeight: 900, fontSize: 19, marginTop: 8 }}>Rexa</div>
     <div style={{ fontSize: 12, color: t.sub, marginTop: 5 }}>مدیریت مالی شخصی</div>
-    <div style={{ borderTop: "1px solid #eee", margin: "18px 0", paddingTop: 14, fontSize: 12.5, lineHeight: 2 }}>نسخه ۵.۱.۲{APP_BUILD ? ` (ساخت ${toFaInt(APP_BUILD)})` : ""}<br />Android / Capacitor<br />Rexa Personal Finance</div>
+    <div style={{ borderTop: "1px solid #eee", margin: "18px 0", paddingTop: 14, fontSize: 12.5, lineHeight: 2 }}>نسخه ۴.۶.۹{APP_BUILD ? ` (ساخت ${toFaInt(APP_BUILD)})` : ""}<br />Android / Capacitor<br />Rexa Personal Finance</div>
     {Capacitor.isNativePlatform() && APP_REPO && <>
       <button onClick={() => checkUpdateNow?.(true)} style={st.primaryBtn}>بررسی به‌روزرسانی</button>
       {updateMsg && <div style={{ marginTop: 10, fontSize: 12.5, fontWeight: 700, color: BRAND.darkgreen }}>{updateMsg}</div>}

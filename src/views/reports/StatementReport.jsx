@@ -14,7 +14,7 @@ import { RangePicker } from "./RangePicker.jsx";
 
 export function StatementReport({ accounts, transactions, categories, members, projects, events }) {
   const st = useStyles(); const t = useT();
-  const rs = useRangeState("month");
+  const rs = useRangeState("month", "statement");
   const [accId, setAccId] = useState("__all");
   const [opt, setOpt] = useState({ note: true, category: false, member: false, project: false, event: false, tags: false });
   const { from, to } = rs.range;
