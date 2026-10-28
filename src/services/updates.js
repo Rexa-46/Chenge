@@ -21,7 +21,7 @@ export async function checkLatestRelease(repo) {
     if (r.status === 200 && data) {
       const n = Number(String(data.tag_name || "").replace(/\D/g, ""));
       const apk = (data.assets || []).find((x) => /\.apk$/i.test(x.name));
-      return { build: n, name: data.name || data.tag_name, url: apk?.browser_download_url || data.html_url, page: data.html_url };
+      return { build: n, name: data.name || data.tag_name, url: apk?.browser_download_url || data.html_url, page: data.html_url, notes: parseReleaseNotes(data.body) };
     }
     _updErr = `API ${r.status}`;
   } catch (e) { _updErr = `API ${e?.message || e}`; }
@@ -35,5 +35,16 @@ export async function checkLatestRelease(repo) {
     _updErr += ` | صفحه ${r.status}`;
   } catch (e) { _updErr += ` | صفحه ${e?.message || e}`; }
   return null;
+}
+// متن انتشار گیت‌هاب ← چند تیتر کوتاه (بدون لینک، نام کاربر و علامت‌های مارک‌داون)
+export function parseReleaseNotes(body) {
+  const out = [];
+  String(body || "").split(/\r?\n/).forEach((raw) => {
+    let l = raw.trim();
+    if (!l || /^#{1,6}\s/.test(l) || /full changelog/i.test(l) || /^what'?s changed/i.test(l) || /^new contributors/i.test(l)) return;
+    l = l.replace(/^[-*+]\s+/, "").replace(/\*\*|`|__/g, "").replace(/https?:\/\/\S+/g, "").replace(/\s+by\s+@\S+/gi, "").replace(/\s+in\s*$/i, "").replace(/\s+/g, " ").trim();
+    if (l.length > 2 && !out.includes(l)) out.push(l.length > 70 ? l.slice(0, 68) + "…" : l);
+  });
+  return out.slice(0, 8);
 }
 export const getUpdateError = () => _updErr;
