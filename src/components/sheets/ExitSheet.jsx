@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { ChevronRight, Database, LogOut, ShieldCheck, Calculator, BarChart3, Coins, Receipt, X } from "lucide-react";
+import { usePersistedState } from "../../hooks/usePersistedState.js";
+import { ChevronRight, Check, Database, LogOut, ShieldCheck, Calculator, BarChart3, Coins, Receipt, X } from "lucide-react";
 
 import { FONT } from "../../theme/palette.js";
 
@@ -26,14 +27,17 @@ function Choice({ tone, icon, title, sub, onClick, disabled }) {
 }
 
 export function ExitSheet({ onBackup, onExit, onClose }) {
-  const [step, setStep] = useState("choose");   // choose | enc | busy | done
+  const [step, setStep] = useState("choose");   // choose | busy | done
   const [pass, setPass] = useState("");
+  const [enc, setEnc] = usePersistedState("exitEnc", true);   // تیک = با رمز، بدون تیک = بدون رمز
+  const [hint, setHint] = useState("");
   const [results, setResults] = useState([]);
   const lock = step === "busy";
 
-  async function run(encrypt) {
-    if (encrypt && pass.length < 4) return;
-    setStep("busy");
+  async function run() {
+    if (enc && pass.length < 4) { setHint("برای قفل‌کردن فایل، رمز حداقل ۴ نویسه وارد کن (یا تیک را بردار)."); return; }
+    setHint(""); setStep("busy");
+    const encrypt = enc;
     let res = [];
     try { res = await onBackup({ encrypt, pass }); } catch (e) { res = [{ label: "پشتیبان", ok: false, text: String(e?.message || e) }]; }
     setResults(res); setStep("done");
@@ -58,20 +62,19 @@ export function ExitSheet({ onBackup, onExit, onClose }) {
           {step === "choose" && (
             <div style={{ position: "relative", display: "flex", gap: 8 }}>
               <Choice tone="red" onClick={onExit} title="خروج بدون پشتیبان‌گیری" sub="خروج مستقیم از برنامه" icon={<LogOut size={22} />} />
-              <Choice tone="teal" onClick={() => setStep("enc")} title="خروج با پشتیبان‌گیری" sub="ذخیره اطلاعات پیش از خروج"
+              <Choice tone="teal" onClick={run} title="خروج با پشتیبان‌گیری" sub="ذخیره اطلاعات پیش از خروج"
                 icon={<><Database size={24} /><ShieldCheck size={13} style={{ position: "absolute", bottom: 5, right: 5, background: C.panel, borderRadius: "50%" }} /></>} />
             </div>
           )}
 
-          {step === "enc" && (
-            <div style={{ position: "relative" }}>
-              <div style={{ fontSize: 11.5, color: C.sub, lineHeight: 1.9, marginBottom: 8, textAlign: "center" }}>فایل پشتیبان با رمز قفل شود؟ بعد از این مرحله، پنجره‌ی انتخاب محل ذخیره (فایل‌ها، درایو، وان‌درایو، تلگرام و …) باز می‌شود.</div>
-              <input type="password" value={pass} onChange={(e) => setPass(e.target.value)} placeholder="رمز فایل پشتیبان (حداقل ۴ نویسه)" style={{ width: "100%", padding: "11px 12px", borderRadius: 12, border: "1.5px solid rgba(90,130,255,.4)", background: "rgba(10,16,34,.9)", color: C.title, fontFamily: "inherit", fontSize: 13, outline: "none", marginBottom: 8 }} />
-              <div style={{ display: "flex", gap: 8 }}>
-                <button type="button" onClick={() => run(false)} style={{ ...bigBtn("transparent", C.title, "rgba(127,143,184,.6)"), flex: 1, width: "auto" }}>بدون رمز</button>
-                <button type="button" disabled={pass.length < 4} onClick={() => run(true)} style={{ ...bigBtn(pass.length < 4 ? "#1c4a47" : "#14b8a6", "#fff", "#22d3b6"), flex: 1, width: "auto", opacity: pass.length < 4 ? 0.6 : 1 }}>با رمز</button>
-              </div>
-              <button type="button" onClick={() => setStep("choose")} style={{ width: "100%", marginTop: 8, border: 0, background: "transparent", color: C.sub, fontFamily: "inherit", fontSize: 12, cursor: "pointer" }}>بازگشت</button>
+          {step === "choose" && (
+            <div style={{ position: "relative", marginTop: 10 }}>
+              <label onClick={() => { setEnc((v) => !v); setHint(""); }} style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", color: C.title, fontSize: 12.5, fontWeight: 700 }}>
+                <span style={{ width: 20, height: 20, borderRadius: 6, border: `2px solid ${enc ? "#22d3b6" : "rgba(127,143,184,.7)"}`, background: enc ? "#14b8a6" : "transparent", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>{enc && <Check size={14} color="#fff" strokeWidth={3} />}</span>
+                پشتیبان با رمز قفل شود <span style={{ color: C.sub, fontWeight: 500, fontSize: 11 }}>(بدون تیک = فایل بدون رمز)</span>
+              </label>
+              {enc && <input type="password" value={pass} onChange={(e) => { setPass(e.target.value); setHint(""); }} placeholder="رمز فایل پشتیبان (حداقل ۴ نویسه)" style={{ width: "100%", marginTop: 8, padding: "10px 12px", borderRadius: 12, border: "1.5px solid rgba(90,130,255,.4)", background: "rgba(10,16,34,.9)", color: C.title, fontFamily: "inherit", fontSize: 13, outline: "none" }} />}
+              {hint && <div style={{ marginTop: 6, fontSize: 11.5, color: "#fb7185" }}>{hint}</div>}
             </div>
           )}
 
