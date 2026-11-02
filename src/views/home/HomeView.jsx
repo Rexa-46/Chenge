@@ -9,6 +9,7 @@ import {
 import { TxToolbar, applyTxFilters, hasTxQuery, useTxQuery } from "../../components/common/TxToolbar.jsx";
 import { buildHeadingTree } from "../../domain/headingTree.js";
 import { iconByKeyOrName } from "../../utils/categoryIcons.js";
+import { IconBadge } from "../../components/common/IconBadge.jsx";
 import { BankCardCarousel } from "../../components/cards/BankCardCarousel.jsx";
 import { AddLink } from "../../components/common/AddLink.jsx";
 import { CollapsibleSection } from "../../components/common/CollapsibleSection.jsx";
@@ -135,7 +136,7 @@ export function HomeView({
       const expandable = kids.length > 0 || true;
       return (
         <div key={k} style={depth ? { paddingRight: 10 } : undefined}>
-          <Row leftIcon={(() => { const I = iconByKeyOrName(n.icon, n.name); return <I size={18} />; })()} leftColor={color} title={ownRow ? `${n.name} (مستقیم)` : n.name}
+          <Row leftIcon={(() => { const I = iconByKeyOrName(n.icon, n.name); return <IconBadge icon={I} seed={n.icon || n.name} size={36} />; })()} leftColor="transparent" title={ownRow ? `${n.name} (مستقیم)` : n.name}
             subtitle={isOpen ? (kids.length ? `${toFaInt(kids.length)} زیرمجموعه` : "") : kids.length ? `${toFaInt(kids.length)} زیرمجموعه · لمس برای مشاهده` : "لمس برای مشاهده سندها"}
             value={formatMoney(amount, currency, usdRate)} valueColor={color}
             onClick={expandable ? () => { setOpenTxId(null); setOpenNodes((o) => ({ ...o, [k]: !o[k] })); } : undefined} chevron={isOpen ? "right" : "left"} />

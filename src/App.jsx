@@ -520,6 +520,7 @@ export default function App() {
 
   // فرم خروج: با پشتیبان (گوشی و/یا فضای ابری) یا بدون پشتیبان
   const [showExit, setShowExit] = useState(false);
+  const [showBackup, setShowBackup] = useState(false);   // «دریافت فایل پشتیبان» از تنظیمات (همان کادر خروج با تیک رمز)
   const performExit = useCallback(() => { setShowExit(true); }, []);
   async function exitNow() {
     try { if (Capacitor.isNativePlatform()) await CapacitorApp.exitApp(); else window.history.back(); } catch {}
@@ -550,7 +551,7 @@ export default function App() {
     a.href = url; a.download = filename; document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
     return { label: "فایل", ok: true, text: "دانلود شد" };
   }
-  async function runExitBackup({ encrypt, pass }) {
+  async function runExitBackup({ encrypt, pass, withCloud = true }) {
     const results = [];
     const stamp = `${todayISO()}-${new Date().toTimeString().slice(0, 5).replace(":", "")}`;
     let payload = JSON.stringify(backupState, null, 2), filename = `rexa-backup-${stamp}.json`;
@@ -560,7 +561,7 @@ export default function App() {
     }
     const copy = await saveCopyOnDevice(payload, filename);
     if (copy) results.push(copy);
-    if (syncReady(cloud.cfg)) {   // اگر گیت‌هاب وصل است، نسخه‌ی ابری (رمزگذاری‌شده) هم به‌روز می‌شود
+    if (withCloud && syncReady(cloud.cfg)) {   // اگر گیت‌هاب وصل است، نسخه‌ی ابری (رمزگذاری‌شده) هم به‌روز می‌شود
       const r = await cloud.runSync("push");
       results.push({ label: "فضای ابری", ok: !!r?.ok, text: r?.text || (r?.ok ? "انجام شد" : "انجام نشد") });
     }
@@ -587,7 +588,7 @@ export default function App() {
   // دکمه‌ی برگشت اندروید: فقط یک شنونده‌ی ثابت ثبت می‌شود و آخرین state را از ref می‌خواند
   // (قبلاً با هر تغییر state دوباره و به‌صورت async ثبت می‌شد و شنونده‌های هم‌زمان می‌ماند)
   const backStateRef = useRef({});
-  backStateRef.current = { showExit, showAdd, showQuickAdd, showCapture, menuOpen, subView, tab, showAlarms, showNoteModal, showReminderModal, performExit };
+  backStateRef.current = { showBackup, showExit, showAdd, showQuickAdd, showCapture, menuOpen, subView, tab, showAlarms, showNoteModal, showReminderModal, performExit };
   const exitingRef = useRef(false);
   useEffect(() => {
     if (!loaded || !Capacitor.isNativePlatform()) return;
@@ -597,6 +598,7 @@ export default function App() {
       const stack = window.__rexaBack || [];
       const topOverlay = stack[stack.length - 1];
       if (topOverlay) { topOverlay(); return; }
+      if (st.showBackup) { setShowBackup(false); return; }
       if (st.showExit) { setShowExit(false); return; }
       if (st.showAlarms) { setShowAlarms(false); return; }
       if (st.showNoteModal) { setShowNoteModal(false); return; }
@@ -699,7 +701,7 @@ export default function App() {
     budgets, upsertBudget, expenseByCategory, incomeByCategory,
     loans, setLoans, checks, setChecks, bills, setBills, assets, setAssets,
     recurring, setRecurring, favorites, toggleFavorite, shortcuts, setShortcuts,
-    settings, setSettings, exportBackup, importBackup, exportExcel,
+    settings, setSettings, exportBackup: () => setShowBackup(true), importBackup, exportExcel,
     transactions, catById, accById, totalBalance, totalAssets,
     members, setMembers, events, setEvents, projects, setProjects,
     persons, setPersons, debts, setDebts, currencies, setCurrencies, goals, setGoals,
@@ -859,6 +861,7 @@ export default function App() {
         {showAlarms && <AlarmsSheet items={alarms} onClose={() => setShowAlarms(false)} onOpen={openAlarm} notifBlocked={notifBlocked} onEnableNotif={enableNotif}
           onDoneReminder={(id) => setReminders((p) => p.map((r) => r.id === id ? { ...r, done: true } : r))} />}
         <OrientationGuard />
+        {showBackup && <ExitSheet mode="backup" onBackup={runExitBackup} onClose={() => setShowBackup(false)} />}
         {showExit && <ExitSheet onBackup={runExitBackup} onExit={exitNow} onClose={() => setShowExit(false)} />}
         {menuOpen && <SideMenu onClose={() => setMenuOpen(false)} setSubView={(v) => { setSubView(v); setMenuOpen(false); }} profileName={settings.profile?.name} />}
       </div>
