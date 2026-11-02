@@ -1,13 +1,16 @@
+import { useState } from "react";
 import { Eye, EyeOff, Plus } from "lucide-react";
 
 import { BankCard } from "./BankCard.jsx";
+import { CardDesignPicker } from "./CardDesignPicker.jsx";
 import { usePersistedState } from "../../hooks/usePersistedState.js";
 import { useT } from "../../theme/ThemeContext.js";
 import { BRAND } from "../../theme/palette.js";
 
-export function BankCardCarousel({ accounts, accountBalance, currency, usdRate, onAddCard, onEditAccount }) {
+export function BankCardCarousel({ accounts, accountBalance, currency, usdRate, onAddCard, onEditAccount, onChangeCardDesign }) {
   const t = useT();
   const [hidden, setHidden] = usePersistedState("hideBalance", false);   // تا وقتی کاربر عوضش نکرده همان می‌ماند
+  const [designFor, setDesignFor] = useState(null);
   const cards = accounts.filter((a) => a.type === "bank" || a.type === "card");
   return (
     <div style={{ marginBottom: 16 }}>
@@ -19,7 +22,7 @@ export function BankCardCarousel({ accounts, accountBalance, currency, usdRate, 
         </div>
       )}
       <div style={{ display: "flex", gap: 12, overflowX: "auto", scrollSnapType: "x mandatory", paddingBottom: 4, paddingInline: 2 }}>
-        {cards.map((a) => <BankCard key={a.id} account={a} balance={accountBalance(a.id)} hidden={hidden} currency={currency} usdRate={usdRate} onEdit={() => onEditAccount?.(a)} />)}
+        {cards.map((a) => <BankCard key={a.id} account={a} balance={accountBalance(a.id)} hidden={hidden} currency={currency} usdRate={usdRate} onEdit={() => onEditAccount?.(a)} onDesign={onChangeCardDesign ? () => setDesignFor(a) : undefined} />)}
         <button onClick={onAddCard} style={{
           minWidth: 300, maxWidth: 300, height: 176, borderRadius: 18, flexShrink: 0, scrollSnapAlign: "center",
           border: `2px dashed ${t.border}`, background: t.card, display: "flex", flexDirection: "column",
@@ -31,6 +34,7 @@ export function BankCardCarousel({ accounts, accountBalance, currency, usdRate, 
           <span style={{ fontSize: 12.5, fontWeight: 700 }}>افزودن کارت/حساب جدید</span>
         </button>
       </div>
+    {designFor && <CardDesignPicker hideTrigger externalOpen onExternalClose={() => setDesignFor(null)} value={designFor.cardDesign} cardNumber={designFor.cardNumber} logo={designFor.cardLogo} onChange={(v) => { onChangeCardDesign(designFor.id, { cardDesign: v === "auto" ? undefined : v }); setDesignFor(null); }} onLogoChange={(v) => { onChangeCardDesign(designFor.id, { cardLogo: v }); setDesignFor((a) => ({ ...a, cardLogo: v })); }} />}
     </div>
   );
 }
