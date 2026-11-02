@@ -1,4 +1,6 @@
 import { useMemo, useState } from "react";
+import { TxToolbar, applyTxFilters } from "../../components/common/TxToolbar.jsx";
+import { usePersistedState } from "../../hooks/usePersistedState.js";
 import {
   ArrowLeftRight, FileSpreadsheet, Pencil, Search, Trash2, TrendingDown, TrendingUp,
 } from "lucide-react";
@@ -23,9 +25,10 @@ function CurveToggle({ open, onClick, color }) {
   );
 }
 
-export function TransactionsView({ transactions, catById, accById, checks = [], filter, setFilter, onDelete, onEdit, search, setSearch }) {
+export function TransactionsView({ transactions, catById, accById, checks = [], filter, setFilter, onDelete, onEdit, search, setSearch, accounts = [], categories = [] }) {
   const t = useT();
   const [preview, setPreview] = useState(null);
+  const [adv, setAdv] = usePersistedState("txq:main:f", {});   // فیلتر پیشرفته (حساب/سرفصل/بازه/مبلغ)
   const [expandedId, setExpandedId] = useState(null);
   const checkStatusLabel = { pending: "در انتظار", cashed: "نقد شده", bounced: "برگشتی" };
   const checkPseudo = checks.map((c) => ({
@@ -33,15 +36,8 @@ export function TransactionsView({ transactions, catById, accById, checks = [], 
     note: `چک ${c.type === "received" ? "دریافتی" : "پرداختی"} — ${c.payee}`, checkStatus: c.status,
   }));
   const combined = [...transactions, ...checkPseudo];
-  const filtered = combined.filter((tx) => {
-    if (filter !== "all" && tx.type !== filter) return false;
-    if (search.trim()) {
-      const q = search.trim();
-      const hay = `${catById(tx.categoryId)?.name || ""} ${tx.note || ""} ${(tx.tags || []).join(" ")} ${tx.amount}`;
-      if (!hay.includes(q)) return false;
-    }
-    return true;
-  });
+  const byType = combined.filter((tx) => filter === "all" || tx.type === filter);
+  const filtered = applyTxFilters(byType, { q: search, f: adv }, { catById, accById, categories });
   const grouped = useMemo(() => {
     const map = {};
     filtered.forEach((tx) => { (map[tx.date] = map[tx.date] || []).push(tx); });
@@ -51,13 +47,7 @@ export function TransactionsView({ transactions, catById, accById, checks = [], 
 
   return (
     <div>
-      <div style={{ padding: "10px 14px 0" }}>
-        <div style={{ position: "relative" }}>
-          <Search size={16} color={t.sub} style={{ position: "absolute", top: 12, right: 12 }} />
-          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="جستجو در تراکنش‌ها، برچسب یا یادداشت..."
-            style={{ width: "100%", padding: "10px 36px 10px 12px", borderRadius: 10, border: `1.5px solid ${t.inputBorder}`, background: t.input, color: t.text, fontSize: 13.5, outline: "none", marginBottom: 10 }} />
-        </div>
-      </div>
+      <TxToolbar tq={{ q: search, f: adv }} setTq={(next) => { const v = typeof next === "function" ? next({ q: search, f: adv }) : next; setSearch(v.q); setAdv(v.f || {}); }} accounts={accounts} categories={categories} hide={["type"]} style={{ padding: "10px 14px 10px" }} />
       <div style={{ display: "flex", background: BRAND.header, padding: "0 8px 12px", gap: 4 }}>
         {tabs.map((tItem) => (
           <button key={tItem.key} onClick={() => setFilter(tItem.key)} style={{ flex: 1, padding: "8px 4px", border: "none", borderRadius: 8, cursor: "pointer", background: filter === tItem.key ? "rgba(255,255,255,0.18)" : "transparent", color: "#fff", fontWeight: filter === tItem.key ? 700 : 500, fontSize: 12.5 }}>{tItem.label}</button>

@@ -2,6 +2,7 @@ import {
   Banknote, Building2, Car, Drama, Droplets, Fuel, Gift, HandCoins, Home as HomeIcon, Pill, Shirt,
   ShoppingCart, Smartphone, Sparkles, Utensils, Wifi, Wrench, Zap,
 } from "lucide-react";
+import { ICONS } from "./iconLibrary.js";
 
 export function categoryIconFor(name = "") {
   const n = String(name);
@@ -25,3 +26,7 @@ export function categoryIconFor(name = "") {
   if (/وام|قسط|درآمد|فروش|سود/.test(n)) return Banknote;
   return Sparkles;
 }
+
+// آیکن انتخابی کاربر (category.icon) ← در غیر این صورت حدس از روی نام
+export const categoryIconOf = (c) => (c?.icon && ICONS[c.icon]) || categoryIconFor(c?.name || "");
+export const iconByKeyOrName = (key, name) => (key && ICONS[key]) || categoryIconFor(name || "");

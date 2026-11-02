@@ -7,6 +7,7 @@ import { BRAND } from "../../theme/palette.js";
 import { useStyles } from "../../theme/styles.js";
 import { addDays, jf } from "../../utils/dates.js";
 import { toFaInt } from "../../utils/format.js";
+import { TxToolbar, applyTxFilters, useTxQuery } from "../../components/common/TxToolbar.jsx";
 import { AccountPicker } from "./AccountPicker.jsx";
 import { DocView } from "./DocView.jsx";
 import { ExportBar } from "./ExportBar.jsx";
@@ -16,13 +17,13 @@ export function StatementReport({ accounts, transactions, categories, members, p
   const st = useStyles(); const t = useT();
   const rs = useRangeState("month", "statement");
   const [accId, setAccId] = useState("__all");
+  const [tq, setTq] = useTxQuery("statement");
   const [opt, setOpt] = useState({ note: true, category: false, member: false, project: false, event: false, tags: false });
   const { from, to } = rs.range;
   const single = accId !== "__all" ? accounts.find((a) => a.id === accId) : null;
   const nameOf = (list, id) => list.find((x) => x.id === id)?.name || "";
   const doc = useMemo(() => {
-    const txs = transactions
-      .filter((x) => x.date >= from && x.date <= to && (!single || x.accountId === single.id || x.toAccountId === single.id))
+    const txs = applyTxFilters(transactions.filter((x) => x.date >= from && x.date <= to && (!single || x.accountId === single.id || x.toAccountId === single.id)), tq, { catById: (id) => categories.find((c) => c.id === id), accById: (id) => accounts.find((a) => a.id === id), categories })
       .sort((a, b) => (a.date + (a.time || "") + (a.createdAt || "")).localeCompare(b.date + (b.time || "") + (b.createdAt || "")));
     let bal = single ? balanceAtDate(single, transactions, addDays(from, -1)) : 0;
     const opening = bal;
@@ -47,12 +48,13 @@ export function StatementReport({ accounts, transactions, categories, members, p
       title: `صورتحساب - ${single ? single.name : "همه حساب‌ها"}`, subtitle: `از ${jf(from)} تا ${jf(to)}`,
       sections: [{ title: "جمع‌بندی", rows: sumRows }, { title: "ریز تراکنش‌ها", head, rows }],
     };
-  }, [transactions, accounts, categories, members, projects, events, single, from, to, opt]);
+  }, [transactions, accounts, categories, members, projects, events, single, from, to, opt, tq]);
   const chips = [["note", "شرح"], ["category", "دسته"], ["member", "عضو خانواده"], ["project", "پروژه"], ["event", "رویداد"], ["tags", "برچسب"]];
   return (
     <div>
       <ExportBar doc={doc} />
       <div style={{ ...st.card, padding: 14, marginBottom: 14 }}>
+        <TxToolbar tq={tq} setTq={setTq} accounts={accounts} categories={categories} hide={["account", "period"]} style={{ marginBottom: 10 }} />
         <AccountPicker accounts={accounts} value={accId} onChange={setAccId} allowAll />
         <RangePicker rs={rs} />
         <div style={{ fontSize: 12.5, fontWeight: 700, color: t.sub, marginBottom: 8 }}>نمایش در صورتحساب (با تیک زدن اضافه می‌شود)</div>
