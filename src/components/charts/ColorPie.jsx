@@ -1,5 +1,5 @@
 import { useT } from "../../theme/ThemeContext.js";
-import { categoryIconFor } from "../../utils/categoryIcons.js";
+import { iconByKeyOrName } from "../../utils/categoryIcons.js";
 import { polarPt, ringPath, slicePath } from "../../utils/svgPaths.js";
 
 export function ColorPie({ data, selected, onSelect }) {
@@ -22,7 +22,7 @@ export function ColorPie({ data, selected, onSelect }) {
         const mid = (s.a0 + s.a1) / 2;
         const isSel = selected === s.i;
         const [ox, oy] = isSel ? polarPt(0, 0, 9, mid) : [0, 0];
-        const Icon = categoryIconFor(s.name);
+        const Icon = iconByKeyOrName(s.icon, s.name);
         const [ix, iy] = polarPt(cx, cy, R * 0.63, mid);
         const arcLen = (s.span * Math.PI / 180) * R * 0.63;
         const size = Math.min(46, arcLen * 0.75);

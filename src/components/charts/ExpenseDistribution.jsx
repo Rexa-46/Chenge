@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { Bar, BarChart, CartesianGrid, Cell, ResponsiveContainer, XAxis, YAxis } from "recharts";
 
-import { categoryIconFor } from "../../utils/categoryIcons.js";
+import { iconByKeyOrName } from "../../utils/categoryIcons.js";
 import { FONT } from "../../theme/palette.js";
 import { addDays, todayISO } from "../../utils/dates.js";
 import { faDigits, formatMoney, toFaInt } from "../../utils/format.js";
@@ -33,7 +33,7 @@ export function ExpenseDistribution({ data = [], transactions = [], currency, us
   return (
     <div dir="rtl" style={{ ...PANEL, padding: 10, fontFamily: FONT, color: "#e8f1f7" }}>
       {data.map((d, i) => {
-        const color = NEON[i % NEON.length]; const Icon = categoryIconFor(d.name);
+        const color = NEON[i % NEON.length]; const Icon = iconByKeyOrName(d.icon, d.name);
         const kids = d.children || [];
         return (
           <div key={d.name + i}>

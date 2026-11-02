@@ -7,7 +7,7 @@ export function buildHeadingTree(txs, type, categories, amountOf = (x) => Number
   const nodes = new Map();
   const getNode = (c, fallbackName) => {
     const id = c ? c.id : "__none";
-    if (!nodes.has(id)) nodes.set(id, { id, name: c ? c.name : fallbackName, own: 0, amount: 0, parentId: c && byId.has(c.parentId) ? c.parentId : null, children: [] });
+    if (!nodes.has(id)) nodes.set(id, { id, name: c ? c.name : fallbackName, icon: c ? c.icon : undefined, own: 0, amount: 0, parentId: c && byId.has(c.parentId) ? c.parentId : null, children: [] });
     return nodes.get(id);
   };
   txs.forEach((tx) => {

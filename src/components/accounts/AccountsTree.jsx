@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Check, ChevronLeft, FolderInput, Pencil, Plus, Search, Star, Trash2, X } from "lucide-react";
+import { Check, ChevronLeft, FolderInput, Pencil, Shapes, Plus, Search, Star, Trash2, X } from "lucide-react";
 
 import { EmptyRow } from "../common/EmptyRow.jsx";
 import { ACCOUNT_GROUPS, accountPath, DEBT_GROUPS, faKey } from "../../domain/accountTree.js";
@@ -9,6 +9,9 @@ import { useStyles } from "../../theme/styles.js";
 import { toFaInt } from "../../utils/format.js";
 import { uid } from "../../utils/id.js";
 import { MoveCategorySheet } from "./MoveCategorySheet.jsx";
+import { IconPickerSheet } from "./IconPickerSheet.jsx";
+import { categoryIconFor, categoryIconOf } from "../../utils/categoryIcons.js";
+import { ICONS } from "../../utils/iconLibrary.js";
 
 export function AccountsTree({ categories = [], transactions = [], addCategory, deleteCategory, updateCategory, moveCategory, favorites, toggleFavorite, mode = "manage", value, onPick, selectable, onBlocked, defaultExpanded }) {
   const st = useStyles();
@@ -26,6 +29,10 @@ export function AccountsTree({ categories = [], transactions = [], addCategory, 
   const [newTwoWay, setNewTwoWay] = useState(false);
   const [editTwoWay, setEditTwoWay] = useState(false);
   const [moveTarget, setMoveTarget] = useState(null);
+  const [iconTarget, setIconTarget] = useState(null);
+  const [pickNew, setPickNew] = useState(null);   // انتخاب آیکن هنگام ساخت مورد جدید: "add" | "new"
+  const [addIcon, setAddIcon] = useState(undefined);
+  const [newIcon, setNewIcon] = useState(undefined);
   const favIds = favorites?.categories || [];
   const q = faKey(query);
 
@@ -45,18 +52,19 @@ export function AccountsTree({ categories = [], transactions = [], addCategory, 
   };
   const toggle = (k) => setExpanded((e) => ({ ...e, [k]: !e[k] }));
 
-  function create(kind, parentId, name, twoWay = false) {
+  function create(kind, parentId, name, twoWay = false, icon) {
     const nm = String(name || "").trim(); if (!nm) return;
     const id = uid();
-    addCategory?.({ id, name: nm, kind, ...(parentId ? { parentId } : {}), ...(twoWay ? { twoWay: true } : {}) });
+    addCategory?.({ id, name: nm, kind, ...(parentId ? { parentId } : {}), ...(twoWay ? { twoWay: true } : {}), ...(icon ? { icon } : {}) });
     setExpanded((e) => ({ ...e, [parentId || `g:${kind}`]: true }));
     if (picking) onPick?.(id);
   }
   function renderAddForm(kind, parentId, depth) {
     return (
       <div style={{ display: "flex", gap: 6, padding: "8px 4px", paddingRight: 4 + depth * 18 }}>
+        <button type="button" onClick={() => setPickNew("add")} title="انتخاب آیکن" style={{ width: 44, height: 44, borderRadius: 10, border: `1.5px solid ${t.inputBorder}`, background: t.input, color: BRAND.violet, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", flexShrink: 0, padding: 0 }}>{(() => { const I = (addIcon && ICONS[addIcon]) || categoryIconFor(addName); return <I size={20} />; })()}</button>
         <input autoFocus value={addName} onChange={(e) => setAddName(e.target.value)} placeholder="نام مورد جدید" style={{ ...st.input, margin: 0, flex: 1 }} />
-        <button onClick={() => { const nm = addName; setAddName(""); setAddFor(null); create(kind, parentId, nm); }} style={{ ...st.primaryBtn, width: "auto", padding: "0 16px" }}>افزودن</button>
+        <button onClick={() => { const nm = addName, ic = addIcon; setAddName(""); setAddIcon(undefined); setAddFor(null); create(kind, parentId, nm, false, ic); }} style={{ ...st.primaryBtn, width: "auto", padding: "0 16px" }}>افزودن</button>
       </div>
     );
   }
@@ -78,13 +86,14 @@ export function AccountsTree({ categories = [], transactions = [], addCategory, 
             <button onClick={() => setEditId(null)} style={smallBtn(t.sub)}><X size={14} /></button>
           </>) : (<>
             <div onClick={picking ? (locked ? () => { if (kids.length) toggle(c.id); else onBlocked?.(c); } : kids.length ? () => toggle(c.id) : () => onPick?.(c.id)) : kids.length ? () => toggle(c.id) : undefined} style={{ flex: 1, minWidth: 0, cursor: picking || kids.length ? "pointer" : "default" }}>
-              <div style={{ fontSize: depth ? 13 : 14, fontWeight: selected ? 800 : depth ? 500 : 600, color: t.text }}>{depth > 0 && "↳ "}{c.name}{c.twoWay && <span style={{ marginRight: 6, fontSize: 10.5, fontWeight: 700, color: BRAND.violet, background: "rgba(88,39,119,.10)", borderRadius: 10, padding: "1px 7px" }}>↔ دو طرفه</span>}</div>
+              <div style={{ fontSize: depth ? 13 : 14, fontWeight: selected ? 800 : depth ? 500 : 600, color: t.text }}>{depth > 0 && "↳ "}{(() => { const I = categoryIconOf(c); return <I size={depth ? 14 : 16} color={BRAND.violet} style={{ marginLeft: 6, verticalAlign: "-3px" }} />; })()}{c.name}{c.twoWay && <span style={{ marginRight: 6, fontSize: 10.5, fontWeight: 700, color: BRAND.violet, background: "rgba(88,39,119,.10)", borderRadius: 10, padding: "1px 7px" }}>↔ دو طرفه</span>}</div>
               {c.twoWay && !picking && !flat && (() => { const tt = twoWayTotals(c); return (tt.debit || tt.credit) ? <div style={{ fontSize: 11, color: t.sub, marginTop: 2 }}>بدهکار: {toFaInt(tt.debit)} · بستانکار: {toFaInt(tt.credit)} · مانده: {toFaInt(Math.abs(tt.debit - tt.credit))} {tt.debit >= tt.credit ? "بدهکار" : "بستانکار"}</div> : null; })()}
               {flat && path && <div style={{ fontSize: 11, color: t.sub, marginTop: 2 }}>{path}</div>}
             </div>
             {selected && <Check size={16} color={BRAND.darkgreen} />}
             {!picking && toggleFavorite && <button onClick={() => toggleFavorite("categories", c.id)} style={smallBtn("#f5b301")}><Star size={15} fill={favIds.includes(c.id) ? "#f5b301" : "none"} color="#f5b301" /></button>}
             {!picking && <button onClick={() => { setEditId(c.id); setEditVal(c.name); setEditTwoWay(!!c.twoWay); }} style={smallBtn(BRAND.violet)}><Pencil size={15} /></button>}
+            {!picking && updateCategory && <button onClick={() => setIconTarget(c)} title="تغییر آیکن" style={smallBtn(BRAND.mauve || BRAND.violet)}><Shapes size={15} /></button>}
             {!picking && moveCategory && <button onClick={() => setMoveTarget(c)} title="انتقال به سرفصل دیگر" style={smallBtn(BRAND.teal || BRAND.violet)}><FolderInput size={15} /></button>}
             {!selectable && <button onClick={() => { setAddFor(addFor?.parentId === c.id ? null : { kind: c.kind, parentId: c.id }); setAddName(""); setExpanded((e) => ({ ...e, [c.id]: true })); }} style={smallBtn(BRAND.green)}><Plus size={15} /></button>}
             {!picking && <button onClick={() => { if (window.confirm(`«${c.name}»${childrenOf(c.id).length ? " و زیرمجموعه‌هایش" : ""} حذف شود؟`)) deleteCategory?.(c.id); }} style={smallBtn(BRAND.crimson)}><Trash2 size={15} /></button>}
@@ -146,6 +155,8 @@ export function AccountsTree({ categories = [], transactions = [], addCategory, 
           {results.length === 0 ? <EmptyRow text="موردی پیدا نشد" /> : results.map((c) => renderNode(c, 0, true))}
         </div>
       ) : ACCOUNT_GROUPS.map(renderGroup)}
+      {pickNew && <IconPickerSheet category={{ name: (pickNew === "add" ? addName : newName) || "مورد جدید", icon: pickNew === "add" ? addIcon : newIcon }} onClose={() => setPickNew(null)} onPick={(k) => { (pickNew === "add" ? setAddIcon : setNewIcon)(k); setPickNew(null); }} />}
+      {iconTarget && <IconPickerSheet category={categories.find((x) => x.id === iconTarget.id) || iconTarget} onClose={() => setIconTarget(null)} onPick={(k) => { updateCategory(iconTarget.id, { icon: k }); setIconTarget(null); }} />}
       {moveTarget && <MoveCategorySheet category={moveTarget} categories={categories} transactions={transactions} onClose={() => setMoveTarget(null)} onMove={(parentId, kind) => { moveCategory(moveTarget.id, parentId, kind); setMoveTarget(null); }} />}
       {!selectable && (<div style={{ ...st.card, padding: 12, marginTop: 4, border: `1.5px dashed ${t.inputBorder}`, boxShadow: "none" }}>
         <div onClick={() => setShowNew((v) => !v)} style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", color: BRAND.header, fontWeight: 800, fontSize: 13.5 }}>
@@ -157,12 +168,15 @@ export function AccountsTree({ categories = [], transactions = [], addCategory, 
             <select value={newKind} onChange={(e) => setNewKind(e.target.value)} style={st.input}>
               {ACCOUNT_GROUPS.map((g) => <option key={g.kind} value={g.kind}>{g.label}</option>)}
             </select>
-            <input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="نام حساب" style={st.input} />
+            <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
+              <button type="button" onClick={() => setPickNew("new")} title="انتخاب آیکن" style={{ width: 44, height: 44, borderRadius: 10, border: `1.5px solid ${t.inputBorder}`, background: t.input, color: BRAND.violet, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", flexShrink: 0, padding: 0 }}>{(() => { const I = (newIcon && ICONS[newIcon]) || categoryIconFor(newName); return <I size={20} />; })()}</button>
+              <input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="نام حساب" style={{ ...st.input, margin: 0, flex: 1 }} />
+            </div>
             <label style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, fontSize: 12.5, fontWeight: 700, color: t.text, cursor: "pointer" }}>
               <input type="checkbox" checked={newTwoWay} onChange={(e) => setNewTwoWay(e.target.checked)} style={{ width: 18, height: 18 }} />
               دو طرفه (هم بدهکار هم بستانکار — مثل بیمه)
             </label>
-            <button onClick={() => { const nm = newName, tw = newTwoWay; setNewName(""); setNewTwoWay(false); setShowNew(false); create(newKind, null, nm, tw); }} style={st.primaryBtn}>افزودن</button>
+            <button onClick={() => { const nm = newName, tw = newTwoWay, ic = newIcon; setNewName(""); setNewTwoWay(false); setNewIcon(undefined); setShowNew(false); create(newKind, null, nm, tw, ic); }} style={st.primaryBtn}>افزودن</button>
           </div>
         )}
       </div>)}
