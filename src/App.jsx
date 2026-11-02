@@ -33,6 +33,7 @@ import { buildAlarms } from "./domain/alarms.js";
 import { askExactAlarm, exactAlarmStatus, listenNotificationActions, onLoanPayRequest, requestLoanPay, rescheduleDueNotifications } from "./services/notifications.js";
 import { decryptSnapshot, encryptSnapshot, syncReady } from "./services/githubSync.js";
 import { ExitSheet } from "./components/sheets/ExitSheet.jsx";
+import { OrientationGuard } from "./components/common/OrientationGuard.jsx";
 import { UpdateNotesToast } from "./components/common/UpdateNotesToast.jsx";
 import { isEncryptedBackup, validateBackup } from "./services/backupValidate.js";
 import { makePinRecord, withoutPin } from "./services/pinLock.js";
@@ -841,7 +842,7 @@ export default function App() {
 
         {showAdd && (
           <AddTransactionSheet
-            accounts={accounts} categories={categories} favorites={favorites}
+            accounts={accounts} categories={categories} favorites={favorites} transactions={transactions}
             onAddAccount={addAccount} onAddCategory={addCategory}
             members={members} events={events} projects={projects}
             initial={prefillTx}
@@ -857,6 +858,7 @@ export default function App() {
         )}
         {showAlarms && <AlarmsSheet items={alarms} onClose={() => setShowAlarms(false)} onOpen={openAlarm} notifBlocked={notifBlocked} onEnableNotif={enableNotif}
           onDoneReminder={(id) => setReminders((p) => p.map((r) => r.id === id ? { ...r, done: true } : r))} />}
+        <OrientationGuard />
         {showExit && <ExitSheet onBackup={runExitBackup} onExit={exitNow} onClose={() => setShowExit(false)} />}
         {menuOpen && <SideMenu onClose={() => setMenuOpen(false)} setSubView={(v) => { setSubView(v); setMenuOpen(false); }} profileName={settings.profile?.name} />}
       </div>
