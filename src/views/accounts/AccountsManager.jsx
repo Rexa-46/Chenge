@@ -5,6 +5,7 @@ import { EmptyRow } from "../../components/common/EmptyRow.jsx";
 import { Row } from "../../components/common/Row.jsx";
 import { AmountInput } from "../../components/inputs/AmountInput.jsx";
 import { KeypadInput } from "../../components/inputs/KeypadInput.jsx";
+import { CardDesignPicker } from "../../components/cards/CardDesignPicker.jsx";
 import { useT } from "../../theme/ThemeContext.js";
 import { BRAND } from "../../theme/palette.js";
 import { pillStyle, useStyles, miniBtn } from "../../theme/styles.js";
@@ -20,9 +21,11 @@ export function AccountsManager({ accounts, addAccount, deleteAccount, updateAcc
   const [initial, setInitial] = useState("");
   const [cardNumber, setCardNumber] = useState("");
   const [expiryDate, setExpiryDate] = useState("");
+  const [cardDesign, setCardDesign] = useState("auto");
+  const [cardLogo, setCardLogo] = useState(undefined);
   const [editingId, setEditingId] = useState(null);
   const [averageAccountId, setAverageAccountId] = useState(null);
-  const [editForm, setEditForm] = useState({ name: "", initial: "", cardNumber: "", expiryDate: "" });
+  const [editForm, setEditForm] = useState({ name: "", initial: "", cardNumber: "", expiryDate: "", cardDesign: "auto", cardLogo: undefined });
 
   useEffect(() => {
     if (!initialEditAccount) return;
@@ -38,7 +41,7 @@ export function AccountsManager({ accounts, addAccount, deleteAccount, updateAcc
 
   function openEdit(a) {
     setEditingId(a.id);
-    setEditForm({ name: a.name || "", initial: String(a.initial || 0), cardNumber: String(a.cardNumber || ""), expiryDate: expiryFromStored(a.expiryDate) });
+    setEditForm({ name: a.name || "", initial: String(a.initial || 0), cardNumber: String(a.cardNumber || ""), expiryDate: expiryFromStored(a.expiryDate), cardDesign: a.cardDesign || "auto", cardLogo: a.cardLogo });
   }
   function saveEdit(a) {
     if (!editForm.name.trim()) return;
@@ -46,14 +49,15 @@ export function AccountsManager({ accounts, addAccount, deleteAccount, updateAcc
     updateAccount?.(a.id, {
       name: editForm.name.trim(),
       initial: Number(editForm.initial || 0),
-      ...(a.type === "bank" || a.type === "card" ? { cardNumber: cleanCard || undefined, cardNumberLast4: cleanCard ? cleanCard.slice(-4) : a.cardNumberLast4, expiryDate: editForm.expiryDate.trim() || undefined } : {}),
+      ...(a.type === "bank" || a.type === "card" ? { cardNumber: cleanCard || undefined, cardNumberLast4: cleanCard ? cleanCard.slice(-4) : a.cardNumberLast4, expiryDate: editForm.expiryDate.trim() || undefined, cardDesign: editForm.cardDesign === "auto" ? undefined : editForm.cardDesign, cardLogo: editForm.cardLogo || undefined } : {}),
     });
     setEditingId(null);
   }
   function add() {
     if (!name.trim()) return;
     const cleanCard = cardNumber.replace(/\D/g, "").slice(0, 16);
-    addAccount({ name: name.trim(), type, initial: Number(initial || 0), cardNumber: cleanCard || undefined, cardNumberLast4: cleanCard ? cleanCard.slice(-4) : undefined, expiryDate: expiryDate.trim() || undefined });
+    addAccount({ name: name.trim(), type, initial: Number(initial || 0), cardNumber: cleanCard || undefined, cardNumberLast4: cleanCard ? cleanCard.slice(-4) : undefined, expiryDate: expiryDate.trim() || undefined, cardDesign: cardDesign === "auto" ? undefined : cardDesign, cardLogo: cardLogo || undefined });
+    setCardDesign("auto"); setCardLogo(undefined);
     setName(""); setInitial(""); setCardNumber(""); setExpiryDate("");
   }
 
@@ -76,6 +80,7 @@ export function AccountsManager({ accounts, addAccount, deleteAccount, updateAcc
       {(type === "bank" || type === "card") && <>
         <KeypadInput kind="digits" digitsMax={16} placeholder="شماره کارت ۱۶ رقمی" value={cardNumber} onChange={(e) => setCardNumber(e.target.value.replace(/[^0-9۰-۹]/g, "").replace(/[۰-۹]/g, d => "0123456789"["۰۱۲۳۴۵۶۷۸۹".indexOf(d)]).slice(0, 16))} style={st.input} inputMode="numeric" maxLength={16} />
         <KeypadInput kind="digits" digitsMax={4} placeholder="تاریخ انقضا، مثلا 04/08" value={expiryDate} onChange={(e) => setExpiryDate(fmtExpiry4(e.target.value))} style={st.input} inputMode="numeric" maxLength={5} />
+        <CardDesignPicker value={cardDesign} cardNumber={cardNumber} onChange={setCardDesign} logo={cardLogo} onLogoChange={setCardLogo} />
       </>}
       <button onClick={add} style={st.primaryBtn}>افزودن</button>
     </div>
@@ -99,6 +104,7 @@ export function AccountsManager({ accounts, addAccount, deleteAccount, updateAcc
           {(a.type === "bank" || a.type === "card") && <>
             <KeypadInput kind="digits" digitsMax={16} value={editForm.cardNumber} onChange={(e) => setEditForm(f => ({ ...f, cardNumber: e.target.value.replace(/[^0-9۰-۹]/g, "").replace(/[۰-۹]/g, d => "0123456789"["۰۱۲۳۴۵۶۷۸۹".indexOf(d)]).slice(0, 16) }))} placeholder="شماره کارت ۱۶ رقمی" style={{ ...st.input, marginBottom: 7 }} inputMode="numeric" maxLength={16} />
             <KeypadInput kind="digits" digitsMax={4} value={editForm.expiryDate} onChange={(e) => setEditForm(f => ({ ...f, expiryDate: fmtExpiry4(e.target.value) }))} placeholder="تاریخ انقضا، مثلا 04/08" style={{ ...st.input, marginBottom: 7 }} inputMode="numeric" maxLength={5} />
+            <CardDesignPicker value={editForm.cardDesign} cardNumber={editForm.cardNumber} onChange={(v) => setEditForm((f) => ({ ...f, cardDesign: v }))} logo={editForm.cardLogo} onLogoChange={(v) => setEditForm((f) => ({ ...f, cardLogo: v }))} />
           </>}
           <div style={{ display: "flex", gap: 6 }}>
             <button onClick={(e) => { e.stopPropagation(); saveEdit(a); }} style={{ ...st.primaryBtn, flex: 1 }}>ذخیره اصلاحات</button>
