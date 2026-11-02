@@ -2,17 +2,23 @@ import { useState } from "react";
 import { Check, Image as ImageIcon, Plus, Star, X } from "lucide-react";
 
 import { AccountPickerField } from "../inputs/AccountPickerField.jsx";
+import { IconPickerSheet } from "../accounts/IconPickerSheet.jsx";
+import { accountPath } from "../../domain/accountTree.js";
+import { categoryIconFor } from "../../utils/categoryIcons.js";
+import { ICONS } from "../../utils/iconLibrary.js";
 import { AmountInput } from "../inputs/AmountInput.jsx";
 import { BankAccountField } from "../inputs/BankAccountField.jsx";
 import { JalaliDateInput } from "../inputs/JalaliDateInput.jsx";
 import { SourceAccountField } from "../inputs/SourceAccountField.jsx";
 import { BRAND } from "../../theme/palette.js";
 import { useStyles, miniBtn } from "../../theme/styles.js";
-import { todayISO } from "../../utils/dates.js";
+import { isVehicleCategory, odometerContext, parseKm } from "../../domain/odometer.js";
+import { jf, todayISO } from "../../utils/dates.js";
+import { toFaInt } from "../../utils/format.js";
 import { uid } from "../../utils/id.js";
 import { resizeImage } from "../../utils/image.js";
 
-export function AddTransactionSheet({ accounts, categories, favorites, members = [], events = [], projects = [], initial, onClose, onSubmit, onAddAccount, onAddCategory }) {
+export function AddTransactionSheet({ accounts, categories, favorites, members = [], events = [], projects = [], transactions = [], initial, onClose, onSubmit, onAddAccount, onAddCategory }) {
   const st = useStyles();
   const [type, setType] = useState(initial?.type || "expense");
   const [amount, setAmount] = useState(initial?.amount ? String(initial.amount) : "");
@@ -38,7 +44,17 @@ export function AddTransactionSheet({ accounts, categories, favorites, members =
   const [projectId, setProjectId] = useState(initial?.projectId || "");
   const [inlineAdd, setInlineAdd] = useState(null);
   const [inlineName, setInlineName] = useState("");
+  const [inlineIcon, setInlineIcon] = useState(undefined);
+  const [inlineParent, setInlineParent] = useState("");
+  const [inlineIconOpen, setInlineIconOpen] = useState(false);
   const [side, setSide] = useState(initial?.side || "");
+  const [odometer, setOdometer] = useState(initial?.odometer ? String(initial.odometer) : "");
+  const [forceOdo, setForceOdo] = useState(!!initial?.odometer);
+  const isVehicle = type === "expense" && !!categoryId && isVehicleCategory(categories, categoryId);
+  const showOdo = type === "expense" && !!categoryId && (isVehicle || forceOdo);
+  const odoCtx = showOdo ? odometerContext(transactions, { categoryId, date, time, excludeId: initial?._editId }) : null;
+  const odoNow = parseKm(odometer);
+  const catName = categories.find((c) => c.id === categoryId)?.name || "";
 
   const twoWayPicked = !!categories.find((c) => c.id === categoryId)?.twoWay;
   const effectiveSide = side || (type === "income" ? "creditor" : "debtor");
@@ -86,7 +102,7 @@ export function AddTransactionSheet({ accounts, categories, favorites, members =
             <label style={st.label}>حساب‌ها</label>
             <div style={{ display: "flex", gap: 6, alignItems: "flex-start" }}>
               <div style={{ flex: 1 }}><AccountPickerField categories={categories} addCategory={onAddCategory} value={categoryId} onChange={setCategoryId} st={st} /></div>
-              <button type="button" onClick={() => { setInlineAdd("category"); setInlineName(""); }} style={{ ...miniBtn, width: 44, height: 44, background: BRAND.header, color: "#fff" }} title="افزودن دسته"><Plus size={18} /></button>
+              <button type="button" onClick={() => { setInlineAdd("category"); setInlineName(""); setInlineIcon(undefined); setInlineParent(""); }} style={{ ...miniBtn, width: 44, height: 44, background: BRAND.header, color: "#fff" }} title="افزودن دسته"><Plus size={18} /></button>
             </div>
             {twoWayPicked && (
               <div style={{ marginBottom: 10 }}>
@@ -99,6 +115,28 @@ export function AddTransactionSheet({ accounts, categories, favorites, members =
                 <div style={{ fontSize: 11, color: "#8a8194", marginTop: 5, lineHeight: 1.8 }}>مثلاً بیمه: پرداخت حق بیمه = بدهکار، دریافت خسارت = بستانکار.</div>
               </div>
             )}
+            {type === "expense" && !!categoryId && !showOdo && (
+              <button type="button" onClick={() => setForceOdo(true)} style={{ background: "none", border: "none", color: BRAND.header, fontWeight: 700, fontSize: 12, cursor: "pointer", padding: "0 0 10px" }}>+ ثبت کیلومتر خودرو برای این مورد</button>
+            )}
+            {showOdo && (
+              <div style={{ marginBottom: 10 }}>
+                <label style={st.label}>کیلومتر فعلی خودرو (اختیاری)</label>
+                <input inputMode="numeric" value={odometer} onChange={(e) => setOdometer(e.target.value)} placeholder="مثلاً ۱۲۳٬۴۵۰" style={{ ...st.input, direction: "ltr", textAlign: "center", marginBottom: 6 }} />
+                <div style={{ fontSize: 11.5, color: "#6d6678", lineHeight: 1.9 }}>
+                  {odoCtx?.lastSame && <div>آخرین «{catName}»: {toFaInt(odoCtx.lastSame.odometer)} کیلومتر ({jf(odoCtx.lastSame.date)})</div>}
+                  {odoCtx?.lastAny ? <div>آخرین کیلومتر ثبت‌شده: {toFaInt(odoCtx.lastAny.odometer)} ({jf(odoCtx.lastAny.date)})</div> : <div>هنوز کیلومتری ثبت نشده؛ دفعه‌ی بعد فاصله را نشان می‌دهم.</div>}
+                  {odoNow > 0 && odoCtx?.lastAny && (odoNow >= Number(odoCtx.lastAny.odometer)
+                    ? <div style={{ color: "#1B6B2C", fontWeight: 700 }}>تا الان {toFaInt(odoNow - Number(odoCtx.lastAny.odometer))} کیلومتر رفته‌ای</div>
+                    : <div style={{ color: "#c0392b" }}>این عدد از آخرین کیلومتر ثبت‌شده کمتر است؛ دوباره بررسی کن.</div>)}
+                  {odoNow > 0 && odoCtx?.lastSame && odoCtx.lastSame.id !== odoCtx.lastAny?.id && odoNow >= Number(odoCtx.lastSame.odometer) && (
+                    <div style={{ color: "#1B6B2C", fontWeight: 700 }}>از آخرین «{catName}» ({toFaInt(odoCtx.lastSame.odometer)} کیلومتر، {jf(odoCtx.lastSame.date)}) {toFaInt(odoNow - Number(odoCtx.lastSame.odometer))} کیلومتر گذشته است</div>
+                  )}
+                  {odoNow > 0 && odoCtx?.lastSame && odoCtx.lastSame.id === odoCtx.lastAny?.id && odoNow >= Number(odoCtx.lastSame.odometer) && (
+                    <div>آخرین بار «{catName}» همین ثبت بود.</div>
+                  )}
+                </div>
+              </div>
+            )}
             <label style={st.label}>{type === "expense" ? "از حساب" : "به حساب"}</label>
             <div style={{ display: "flex", gap: 6 }}>
               <div style={{ flex: 1, minWidth: 0 }}><SourceAccountField accounts={accounts} categories={categories} accountId={accountId} fromCategoryId={fromCategoryId} onChange={(v) => { setAccountId(v.accountId); setFromCategoryId(v.fromCategoryId); }} st={st} title={type === "expense" ? "از حساب" : "به حساب"} /></div>
@@ -107,16 +145,30 @@ export function AddTransactionSheet({ accounts, categories, favorites, members =
             {inlineAdd && <div style={{ background: "#f7f4fa", borderRadius: 10, padding: 10, marginBottom: 10 }}>
               <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 6 }}>{inlineAdd === "category" ? "دسته جدید" : "حساب جدید"}</div>
               <div style={{ display: "flex", gap: 6 }}>
+                {inlineAdd === "category" && (() => { const I = (inlineIcon && ICONS[inlineIcon]) || categoryIconFor(inlineName); return <button type="button" onClick={() => setInlineIconOpen(true)} title="انتخاب آیکن" style={{ width: 44, height: 44, borderRadius: 10, border: "1.5px solid #e3e0ea", background: "#fff", color: BRAND.violet, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", flexShrink: 0 }}><I size={20} /></button>; })()}
                 <input autoFocus value={inlineName} onChange={(e) => setInlineName(e.target.value)} placeholder={inlineAdd === "category" ? "نام دسته" : "نام حساب"} style={{ ...st.input, margin: 0, flex: 1 }} />
                 <button onClick={() => {
                   if (!inlineName.trim()) return;
                   const id = uid();
-                  if (inlineAdd === "category") { onAddCategory?.({ id, name: inlineName.trim(), kind: type }); setCategoryId(id); }
-                  else { onAddAccount?.({ id, name: inlineName.trim(), type: "bank", initial: 0 }); setAccountId(id); setFromCategoryId(""); }
+                  if (inlineAdd === "category") {
+                    const parent = inlineParent ? categories.find((c) => c.id === inlineParent) : null;
+                    onAddCategory?.({ id, name: inlineName.trim(), kind: parent?.kind || type, ...(parent ? { parentId: parent.id } : {}), ...(inlineIcon ? { icon: inlineIcon } : {}) });
+                    setCategoryId(id);
+                  } else { onAddAccount?.({ id, name: inlineName.trim(), type: "bank", initial: 0 }); setAccountId(id); setFromCategoryId(""); }
                   setInlineAdd(null);
                 }} style={{ ...st.primaryBtn, width: "auto", padding: "0 14px" }}>افزودن</button>
               </div>
+              {inlineAdd === "category" && (
+                <div style={{ marginTop: 8 }}>
+                  <label style={{ ...st.label, marginTop: 0 }}>زیرمجموعه‌ی</label>
+                  <select value={inlineParent} onChange={(e) => setInlineParent(e.target.value)} style={{ ...st.input, margin: 0 }}>
+                    <option value="">بدون سرفصل (سطح اول)</option>
+                    {categories.filter((c) => c.kind === type).map((c) => ({ id: c.id, label: accountPath(categories, c).join(" / ") })).sort((x, y) => x.label.localeCompare(y.label, "fa")).map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
+                  </select>
+                </div>
+              )}
             </div>}
+            {inlineIconOpen && <IconPickerSheet category={{ name: inlineName || "دسته جدید", icon: inlineIcon }} onClose={() => setInlineIconOpen(false)} onPick={(k) => { setInlineIcon(k); setInlineIconOpen(false); }} />}
           </>
         ) : (
           <>
@@ -184,6 +236,7 @@ export function AddTransactionSheet({ accounts, categories, favorites, members =
             type, amount: Number(amount), categoryId, accountId, fromCategoryId: type !== "transfer" && fromCategoryId ? fromCategoryId : undefined,
             toAccountId: type === "transfer" ? toAccountId : undefined,
             side: twoWayPicked ? effectiveSide : undefined,
+            odometer: showOdo && odoNow > 0 ? odoNow : undefined,
             date, time, note, photo: photo || undefined,
             tags: tagsInput.split(",").map((s) => s.trim()).filter(Boolean),
             memberId: memberId || undefined, eventId: eventId || undefined, projectId: projectId || undefined,
