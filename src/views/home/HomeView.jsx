@@ -6,6 +6,9 @@ import {
   Save, Tag, Target, TrendingDown, TrendingUp, Type, Users,
 } from "lucide-react";
 
+import { TxToolbar, applyTxFilters, hasTxQuery, useTxQuery } from "../../components/common/TxToolbar.jsx";
+import { buildHeadingTree } from "../../domain/headingTree.js";
+import { iconByKeyOrName } from "../../utils/categoryIcons.js";
 import { BankCardCarousel } from "../../components/cards/BankCardCarousel.jsx";
 import { AddLink } from "../../components/common/AddLink.jsx";
 import { CollapsibleSection } from "../../components/common/CollapsibleSection.jsx";
@@ -39,6 +42,7 @@ export function HomeView({
   const [openItem, setOpenItem] = useState(null);   // فقط یک سطر همزمان باز است
   const [openTxId, setOpenTxId] = useState(null);   // فقط یک سند داخل سطر باز است
   const [openNodes, setOpenNodes] = useState({});
+  const [hq, setHq] = useTxQuery("home");   // جستجو/فیلتر فهرست هزینه‌ها و درآمدها
   const toggleItem = (k) => { setOpenTxId(null); setOpenItem((o) => (o === k ? null : k)); };
   const accNameOf = (id) => accounts.find((a) => a.id === id)?.name || "—";
   const banks = accounts.filter((a) => a.type === "bank");
@@ -74,8 +78,8 @@ export function HomeView({
     return null;
   }
   // سندهای مستقیمِ یک حساب (همان فهرست قبلی)؛ هر سطر با لمس باز می‌شود
-  function docRows(kind, color, catId, name) {
-    const txs = transactions.filter((x) => x.type === kind && isPnlTransaction(x) && String(x.categoryId) === String(catId))
+  function docRows(kind, color, catId, name, source = transactions) {
+    const txs = source.filter((x) => x.type === kind && isPnlTransaction(x) && String(x.categoryId) === String(catId))
       .sort((a, b) => `${b.date}${b.time || ""}`.localeCompare(`${a.date}${a.time || ""}`));
     return (
       <div style={{ margin: "0 0 8px", paddingRight: 8 }}>
@@ -117,8 +121,12 @@ export function HomeView({
   }
   // سرفصل‌ها: لمس هر سرفصل زیرمجموعه‌ها (و سندهای مستقیمش) را نشان می‌دهد
   function categoryDocs(kind, color) {
-    const tree = kind === "expense" ? expenseTree : incomeTree;
-    if (!tree.length) return <EmptyRow text={kind === "expense" ? "هزینه‌ای ثبت نشده" : "درآمدی ثبت نشده"} />;
+    const helpers = { catById, accById: (id) => accounts.find((a) => a.id === id), categories };
+    const filtering = hasTxQuery(hq);
+    const source = filtering ? applyTxFilters(transactions, hq, helpers) : transactions;
+    const tree = filtering ? buildHeadingTree(source, kind, categories, (x) => (isPnlTransaction(x) ? pnlAmount(x) : 0)) : kind === "expense" ? expenseTree : incomeTree;
+    const toolbar = <TxToolbar tq={hq} setTq={setHq} accounts={accounts} categories={categories} hide={["type"]} style={{ padding: "6px 0 8px" }} />;
+    if (!tree.length) return <div>{toolbar}<EmptyRow text={filtering ? "موردی با این جستجو/فیلتر نیست" : kind === "expense" ? "هزینه‌ای ثبت نشده" : "درآمدی ثبت نشده"} /></div>;
     const renderNode = (n, depth, ownRow) => {
       const k = `${kind}:${ownRow ? "own:" : ""}${n.id}`;
       const isOpen = !!openNodes[k];
@@ -127,17 +135,17 @@ export function HomeView({
       const expandable = kids.length > 0 || true;
       return (
         <div key={k} style={depth ? { paddingRight: 10 } : undefined}>
-          <Row title={ownRow ? `${n.name} (مستقیم)` : n.name}
+          <Row leftIcon={(() => { const I = iconByKeyOrName(n.icon, n.name); return <I size={18} />; })()} leftColor={color} title={ownRow ? `${n.name} (مستقیم)` : n.name}
             subtitle={isOpen ? (kids.length ? `${toFaInt(kids.length)} زیرمجموعه` : "") : kids.length ? `${toFaInt(kids.length)} زیرمجموعه · لمس برای مشاهده` : "لمس برای مشاهده سندها"}
             value={formatMoney(amount, currency, usdRate)} valueColor={color}
             onClick={expandable ? () => { setOpenTxId(null); setOpenNodes((o) => ({ ...o, [k]: !o[k] })); } : undefined} chevron={isOpen ? "right" : "left"} />
           {isOpen && (kids.length
             ? (<>{n.own > 0 && renderNode(n, depth + 1, true)}{kids.map((c) => renderNode(c, depth + 1, false))}</>)
-            : docRows(kind, color, n.id, n.name))}
+            : docRows(kind, color, n.id, n.name, source))}
         </div>
       );
     };
-    return tree.map((n) => renderNode(n, 0, false));
+    return <div>{toolbar}{tree.map((n) => renderNode(n, 0, false))}</div>;
   }
   function accountDoc(a) {
     const k = `acc:${a.id}`;
@@ -300,7 +308,7 @@ export function HomeView({
 
   return (
     <div style={{ padding: "18px 16px 8px" }}>
-      <BankCardCarousel accounts={accounts} accountBalance={accountBalance} currency={currency} usdRate={usdRate} onAddCard={openAccounts} onEditAccount={onEditAccount} />
+      <BankCardCarousel accounts={accounts} accountBalance={accountBalance} currency={currency} usdRate={usdRate} onAddCard={openAccounts} onEditAccount={onEditAccount} onChangeCardDesign={(id, patch) => onUpdateAccount?.(id, patch)} />
       <DateQuickBox onNote={onNote} onReminder={onReminder} />
       <IncomeExpenseDayWidget day={homeDay} setDay={setHomeDay} transactions={allTransactions} catById={catById} currency={currency} usdRate={usdRate} bills={bills} checks={checks} onOpenTransactions={onOpenTransactions} />
       <CurrencyRatesStrip rates={rates} fetchRates={fetchRates} />
