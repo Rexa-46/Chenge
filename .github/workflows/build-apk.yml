@@ -67,6 +67,9 @@ jobs:
       - name: Enable Android SMS permissions for Rexa APK
         run: node scripts/patch-android-sms.mjs
 
+      - name: Lock app to portrait orientation
+        run: node scripts/patch-android-orientation.mjs
+
       - name: Generate app icon and splash screen (Rexa branding)
         run: npm run gen:assets
 
