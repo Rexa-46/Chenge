@@ -26,7 +26,8 @@ function Choice({ tone, icon, title, sub, onClick, disabled }) {
   );
 }
 
-export function ExitSheet({ onBackup, onExit, onClose }) {
+export function ExitSheet({ onBackup, onExit, onClose, mode = "exit" }) {
+  const backupOnly = mode === "backup";
   const [step, setStep] = useState("choose");   // choose | busy | done
   const [pass, setPass] = useState("");
   const [enc, setEnc] = usePersistedState("exitEnc", true);   // تیک = با رمز، بدون تیک = بدون رمز
@@ -39,7 +40,7 @@ export function ExitSheet({ onBackup, onExit, onClose }) {
     setHint(""); setStep("busy");
     const encrypt = enc;
     let res = [];
-    try { res = await onBackup({ encrypt, pass }); } catch (e) { res = [{ label: "پشتیبان", ok: false, text: String(e?.message || e) }]; }
+    try { res = await onBackup({ encrypt, pass, withCloud: !backupOnly }); } catch (e) { res = [{ label: "پشتیبان", ok: false, text: String(e?.message || e) }]; }
     setResults(res); setStep("done");
   }
   const bigBtn = (bg, color, border) => ({ width: "100%", padding: "11px 0", borderRadius: 13, border: `1.5px solid ${border}`, background: bg, color, fontWeight: 900, fontSize: 13.5, fontFamily: "inherit", cursor: "pointer" });
@@ -55,14 +56,14 @@ export function ExitSheet({ onBackup, onExit, onClose }) {
           <Receipt size={56} color="#3b5bdb" style={{ position: "absolute", right: 8, top: 14, opacity: 0.12 }} />
 
           <div style={{ position: "relative", display: "flex", alignItems: "center", justifyContent: "center", gap: 10, marginBottom: 12 }}>
-            <span style={{ width: 46, height: 46, borderRadius: 14, background: "rgba(25,50,110,.75)", border: "1px solid rgba(90,130,255,.35)", display: "flex", alignItems: "center", justifyContent: "center", color: "#4f8bff" }}><LogOut size={24} /></span>
-            <span style={{ fontWeight: 900, fontSize: 17, color: C.title }}>خروج از اپلیکیشن</span>
+            <span style={{ width: 46, height: 46, borderRadius: 14, background: "rgba(25,50,110,.75)", border: "1px solid rgba(90,130,255,.35)", display: "flex", alignItems: "center", justifyContent: "center", color: "#4f8bff" }}>{backupOnly ? <Database size={24} /> : <LogOut size={24} />}</span>
+            <span style={{ fontWeight: 900, fontSize: 17, color: C.title }}>{backupOnly ? "پشتیبان‌گیری" : "خروج از اپلیکیشن"}</span>
           </div>
 
           {step === "choose" && (
             <div style={{ position: "relative", display: "flex", gap: 8 }}>
-              <Choice tone="red" onClick={onExit} title="خروج بدون پشتیبان‌گیری" sub="خروج مستقیم از برنامه" icon={<LogOut size={22} />} />
-              <Choice tone="teal" onClick={run} title="خروج با پشتیبان‌گیری" sub="ذخیره اطلاعات پیش از خروج"
+              {!backupOnly && <Choice tone="red" onClick={onExit} title="خروج بدون پشتیبان‌گیری" sub="خروج مستقیم از برنامه" icon={<LogOut size={22} />} />}
+              <Choice tone="teal" onClick={run} title={backupOnly ? "دریافت فایل پشتیبان" : "خروج با پشتیبان‌گیری"} sub={backupOnly ? "ذخیره یا ارسال نسخه‌ی پشتیبان" : "ذخیره اطلاعات پیش از خروج"}
                 icon={<><Database size={24} /><ShieldCheck size={13} style={{ position: "absolute", bottom: 5, right: 5, background: C.panel, borderRadius: "50%" }} /></>} />
             </div>
           )}
@@ -86,8 +87,8 @@ export function ExitSheet({ onBackup, onExit, onClose }) {
                 {results.map((r, i) => <div key={i} style={{ fontSize: 12, lineHeight: 1.9, color: r.ok ? "#4ade80" : "#fb7185", textAlign: "center" }}>{r.ok ? "✓" : "✗"} {r.label}: {r.text}</div>)}
               </div>
               <div style={{ display: "flex", gap: 8 }}>
-                <button type="button" onClick={onClose} style={{ ...bigBtn("transparent", C.title, "rgba(127,143,184,.6)"), flex: 1, width: "auto" }}>ماندن</button>
-                <button type="button" onClick={onExit} style={{ ...bigBtn("#ef4444", "#fff", "#f0594f"), flex: 1, width: "auto" }}>خروج</button>
+                <button type="button" onClick={onClose} style={{ ...bigBtn("transparent", C.title, "rgba(127,143,184,.6)"), flex: 1, width: "auto" }}>{backupOnly ? "بستن" : "ماندن"}</button>
+                {!backupOnly && <button type="button" onClick={onExit} style={{ ...bigBtn("#ef4444", "#fff", "#f0594f"), flex: 1, width: "auto" }}>خروج</button>}
               </div>
             </div>
           )}

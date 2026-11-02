@@ -4,7 +4,8 @@ import { Check, Image as ImageIcon, Plus, Star, X } from "lucide-react";
 import { AccountPickerField } from "../inputs/AccountPickerField.jsx";
 import { IconPickerSheet } from "../accounts/IconPickerSheet.jsx";
 import { accountPath } from "../../domain/accountTree.js";
-import { categoryIconFor } from "../../utils/categoryIcons.js";
+import { iconByKeyOrName } from "../../utils/categoryIcons.js";
+import { IconBadge } from "../common/IconBadge.jsx";
 import { ICONS } from "../../utils/iconLibrary.js";
 import { AmountInput } from "../inputs/AmountInput.jsx";
 import { BankAccountField } from "../inputs/BankAccountField.jsx";
@@ -145,7 +146,7 @@ export function AddTransactionSheet({ accounts, categories, favorites, members =
             {inlineAdd && <div style={{ background: "#f7f4fa", borderRadius: 10, padding: 10, marginBottom: 10 }}>
               <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 6 }}>{inlineAdd === "category" ? "دسته جدید" : "حساب جدید"}</div>
               <div style={{ display: "flex", gap: 6 }}>
-                {inlineAdd === "category" && (() => { const I = (inlineIcon && ICONS[inlineIcon]) || categoryIconFor(inlineName); return <button type="button" onClick={() => setInlineIconOpen(true)} title="انتخاب آیکن" style={{ width: 44, height: 44, borderRadius: 10, border: "1.5px solid #e3e0ea", background: "#fff", color: BRAND.violet, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", flexShrink: 0 }}><I size={20} /></button>; })()}
+                {inlineAdd === "category" && (() => { const I = iconByKeyOrName(inlineIcon, inlineName); return <button type="button" onClick={() => setInlineIconOpen(true)} title="انتخاب آیکن" style={{ width: 44, height: 44, borderRadius: 12, border: "1.5px solid #e3e0ea", background: "#fff", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", flexShrink: 0, padding: 0 }}><IconBadge icon={I} seed={inlineIcon || inlineName} size={34} /></button>; })()}
                 <input autoFocus value={inlineName} onChange={(e) => setInlineName(e.target.value)} placeholder={inlineAdd === "category" ? "نام دسته" : "نام حساب"} style={{ ...st.input, margin: 0, flex: 1 }} />
                 <button onClick={() => {
                   if (!inlineName.trim()) return;

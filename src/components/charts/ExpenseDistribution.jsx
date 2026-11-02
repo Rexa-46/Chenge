@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { Bar, BarChart, CartesianGrid, Cell, ResponsiveContainer, XAxis, YAxis } from "recharts";
 
 import { iconByKeyOrName } from "../../utils/categoryIcons.js";
+import { IconBadge } from "../common/IconBadge.jsx";
 import { FONT } from "../../theme/palette.js";
 import { addDays, todayISO } from "../../utils/dates.js";
 import { faDigits, formatMoney, toFaInt } from "../../utils/format.js";
@@ -38,7 +39,7 @@ export function ExpenseDistribution({ data = [], transactions = [], currency, us
         return (
           <div key={d.name + i}>
           <div onClick={kids.length ? () => setOpenRow((o) => ({ ...o, [d.name + i]: !o[d.name + i] })) : undefined} style={{ cursor: kids.length ? "pointer" : "default", display: "flex", alignItems: "center", gap: 10, padding: "9px 10px", marginBottom: 6, borderRadius: 12, background: "rgba(255,255,255,.035)", border: "1px solid rgba(255,255,255,.06)" }}>
-            <span style={{ width: 34, height: 34, borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "center", color, filter: `drop-shadow(0 0 5px ${color}88)`, flexShrink: 0 }}><Icon size={24} strokeWidth={1.8} /></span>
+            <IconBadge icon={Icon} seed={d.icon || d.name} size={34} />
             <span style={{ fontWeight: 800, fontSize: 14, flex: "0 0 auto", minWidth: 64 }}>{d.name}</span>
             <span style={{ flex: 1, textAlign: "left", fontSize: 12.5, color: "#c9d6df", fontWeight: 700 }}>{formatMoney(d.amount, currency, usdRate)}</span>
             <span style={{ fontSize: 12.5, color: "#9fb3c0", minWidth: 36, textAlign: "left" }}>{faDigits(Math.round((d.amount / total) * 100))}٪</span>

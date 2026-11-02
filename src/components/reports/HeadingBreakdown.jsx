@@ -5,6 +5,7 @@ import { useT } from "../../theme/ThemeContext.js";
 import { PIE_COLORS } from "../../theme/chartColors.js";
 import { faDigits, formatMoney } from "../../utils/format.js";
 import { iconByKeyOrName } from "../../utils/categoryIcons.js";
+import { IconBadge } from "../common/IconBadge.jsx";
 
 /* فهرست سرفصل‌ها با باز/بسته شدن زیرمجموعه‌ها (در همه‌ی گزارش‌ها یکسان) */
 export function HeadingBreakdown({ tree = [], color, currency, usdRate, total, empty = "در این بازه موردی نیست", colored = true }) {
@@ -20,7 +21,7 @@ export function HeadingBreakdown({ tree = [], color, currency, usdRate, total, e
       <div key={(ownRow ? "own-" : "") + n.id}>
         <div onClick={kids.length ? () => setOpen((o) => ({ ...o, [n.id]: !o[n.id] })) : undefined}
           style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 2px", paddingRight: 2 + depth * 16, borderTop: `1px solid ${t.border}`, cursor: kids.length ? "pointer" : "default" }}>
-          {(() => { const I = iconByKeyOrName(n.icon, n.name); const c = depth === 0 && colored ? PIE_COLORS[idx % PIE_COLORS.length] : t.sub; return <I size={depth ? 14 : 18} color={c} style={{ flexShrink: 0 }} />; })()}
+          {(() => { const I = iconByKeyOrName(n.icon, n.name); return <IconBadge icon={I} seed={n.icon || n.name} size={depth ? 22 : 28} />; })()}
           <span style={{ flex: 1, fontSize: depth ? 12.5 : 13.5, fontWeight: depth ? 500 : 700, color: depth ? t.sub : t.text }}>{depth > 0 && "↳ "}{ownRow ? `${n.name} (مستقیم)` : n.name}{kids.length > 0 && <span style={{ marginRight: 6, fontSize: 10.5, color: t.sub }}>({faDigits(kids.length + (n.own > 0 ? 1 : 0))} مورد)</span>}</span>
           <span style={{ fontSize: 11.5, color: t.sub }}>{faDigits(sum ? Math.round((amount / sum) * 100) : 0)}٪</span>
           <span style={{ fontSize: 13, fontWeight: 800, color }}>{formatMoney(amount, currency, usdRate)}</span>

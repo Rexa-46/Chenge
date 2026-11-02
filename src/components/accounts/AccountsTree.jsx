@@ -10,9 +10,11 @@ import { toFaInt } from "../../utils/format.js";
 import { uid } from "../../utils/id.js";
 import { MoveCategorySheet } from "./MoveCategorySheet.jsx";
 import { IconPickerSheet } from "./IconPickerSheet.jsx";
-import { categoryIconFor, categoryIconOf } from "../../utils/categoryIcons.js";
+import { categoryIconFor, categoryIconOf, effectiveIconKey } from "../../utils/categoryIcons.js";
 import { ICONS } from "../../utils/iconLibrary.js";
+import { IconBadge } from "../common/IconBadge.jsx";
 
+const GROUP_ICON = { expense: "TrendingDown", income: "TrendingUp", fund: "Wallet", bank: "Landmark", person: "Users", receivable: "HandCoins", payable: "Receipt", asset: "Gem", liability: "Scale", capital: "PiggyBank" };
 export function AccountsTree({ categories = [], transactions = [], addCategory, deleteCategory, updateCategory, moveCategory, favorites, toggleFavorite, mode = "manage", value, onPick, selectable, onBlocked, defaultExpanded }) {
   const st = useStyles();
   const t = useT();
@@ -86,7 +88,7 @@ export function AccountsTree({ categories = [], transactions = [], addCategory, 
             <button onClick={() => setEditId(null)} style={smallBtn(t.sub)}><X size={14} /></button>
           </>) : (<>
             <div onClick={picking ? (locked ? () => { if (kids.length) toggle(c.id); else onBlocked?.(c); } : kids.length ? () => toggle(c.id) : () => onPick?.(c.id)) : kids.length ? () => toggle(c.id) : undefined} style={{ flex: 1, minWidth: 0, cursor: picking || kids.length ? "pointer" : "default" }}>
-              <div style={{ fontSize: depth ? 13 : 14, fontWeight: selected ? 800 : depth ? 500 : 600, color: t.text }}>{depth > 0 && "↳ "}{(() => { const I = categoryIconOf(c); return <I size={depth ? 14 : 16} color={BRAND.violet} style={{ marginLeft: 6, verticalAlign: "-3px" }} />; })()}{c.name}{c.twoWay && <span style={{ marginRight: 6, fontSize: 10.5, fontWeight: 700, color: BRAND.violet, background: "rgba(88,39,119,.10)", borderRadius: 10, padding: "1px 7px" }}>↔ دو طرفه</span>}</div>
+              <div style={{ fontSize: depth ? 13 : 14, fontWeight: selected ? 800 : depth ? 500 : 600, color: t.text }}>{depth > 0 && "↳ "}{(() => { const I = categoryIconOf(c, categories); return <IconBadge icon={I} seed={effectiveIconKey(c, categories) || c.name} size={depth ? 22 : 26} style={{ marginLeft: 8, verticalAlign: "middle" }} />; })()}{c.name}{c.twoWay && <span style={{ marginRight: 6, fontSize: 10.5, fontWeight: 700, color: BRAND.violet, background: "rgba(88,39,119,.10)", borderRadius: 10, padding: "1px 7px" }}>↔ دو طرفه</span>}</div>
               {c.twoWay && !picking && !flat && (() => { const tt = twoWayTotals(c); return (tt.debit || tt.credit) ? <div style={{ fontSize: 11, color: t.sub, marginTop: 2 }}>بدهکار: {toFaInt(tt.debit)} · بستانکار: {toFaInt(tt.credit)} · مانده: {toFaInt(Math.abs(tt.debit - tt.credit))} {tt.debit >= tt.credit ? "بدهکار" : "بستانکار"}</div> : null; })()}
               {flat && path && <div style={{ fontSize: 11, color: t.sub, marginTop: 2 }}>{path}</div>}
             </div>
@@ -125,7 +127,7 @@ export function AccountsTree({ categories = [], transactions = [], addCategory, 
     return (
       <div key={g.kind} style={{ ...st.card, marginBottom: 10, overflow: "hidden" }}>
         <div onClick={() => toggle(key)} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "13px 12px", cursor: "pointer" }}>
-          <span style={{ fontWeight: 800, fontSize: 14.5, color: t.text }}>{g.label}</span>
+          <span style={{ display: "flex", alignItems: "center", gap: 10 }}>{(() => { const GI = ICONS[GROUP_ICON[g.kind]] || categoryIconFor(g.label); return <IconBadge icon={GI} seed={GROUP_ICON[g.kind] || g.kind} size={30} />; })()}<span style={{ fontWeight: 800, fontSize: 14.5, color: t.text }}>{g.label}</span></span>
           {arrowIcon(isOpen, BRAND.header)}
         </div>
         {isOpen && (
